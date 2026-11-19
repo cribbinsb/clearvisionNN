@@ -25,6 +25,9 @@ export const CLIPS = [
   { id: 'svt-smoke-sauna', title: 'Smoke sauna · smoke and fire', credit: SVT },
 ];
 
+// The clip the page opens on: a webcam picture with movement, the case the models are for.
+export const FIRST_CLIP = 'xiph-vidyo4';
+
 /** The URL of a clip's file. */
 export function clipUrl(id) {
   return new URL(`../clips/${id}-720p.mp4`, import.meta.url).href;

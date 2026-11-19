@@ -5,7 +5,7 @@
 // model keeps its history while the pictures are examined.
 
 import { backendsFor, usableBackends } from './backends.js';
-import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS, clipUrl } from './clips.js';
+import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS, FIRST_CLIP, clipUrl } from './clips.js';
 import { createController } from './controller.js';
 import { setUpDegrade } from './degrade.js';
 import { describe, loadModels } from './models.js';
@@ -152,6 +152,7 @@ async function main() {
     ...CLIPS.map((clip) => [`clip:${clip.id}`, clip.title]),
     ['pattern', 'Test pattern'], ['camera', 'Camera'], ['file', 'Video file…'],
   ]);
+  controls.source.value = `clip:${FIRST_CLIP}`;
   degrade = await setUpDegrade(controls, element('codecNote'));
   for (const control of [...controls.view, controls.zoom]) control.addEventListener('change', applyView);
   applyView();

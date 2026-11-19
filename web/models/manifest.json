@@ -1,1 +1,1 @@
-{"models": ["recurrent-xl-8bit", "recurrent-l-8bit", "recurrent-m-8bit", "recurrent-m-float"]}
+{"models": ["recurrent-m-8bit", "recurrent-xl-8bit", "recurrent-l-8bit", "recurrent-m-float"]}
