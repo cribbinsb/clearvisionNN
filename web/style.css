@@ -67,6 +67,9 @@ h1 { font-size: clamp(30px, 3.6vw, 47px); font-weight: 550; line-height: 1.12; l
 .quiet:hover:not(:disabled) { background: var(--soft); }
 
 .session-row { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 10px 4px 14px; font-size: 11px; color: var(--muted); min-height: 1.4em; }
+/* Said where it cannot be missed: the page is running, but not the way it is meant to. */
+.warning { margin: 0 4px 14px; padding: 10px 14px; border: 1px solid #e3d3a6; border-radius: 7px; background: #fbf6e6; color: #5a4a1f; font-size: 12px; }
+.warning:empty { display: none; }
 #status.error { color: var(--error); font-weight: 550; }
 
 .viewer { overflow: hidden; margin-bottom: 18px; }

@@ -89,7 +89,8 @@ const controller = createController({
     if (live) {
       const [width, height] = detail.size;
       const held = state === 'paused' ? ' · paused' : '';
-      say(`${width} × ${height} original → ${width / 2} × ${height / 2} input → ${width} × ${height} output${held}`);
+      const backend = controls.backend.selectedOptions[0]?.text ?? '';
+      say(`${width} × ${height} original → ${width / 2} × ${height / 2} input → ${width} × ${height} output · ${backend}${held}`);
     }
     if (state === 'idle') say('Finished.');
     if (state === 'failed') say(String(detail), true);
@@ -140,8 +141,9 @@ function offerModels() {
   const runnable = models.findIndex(runs);
   const preferred = models.findIndex((model) => model.opensFirst && runs(model));
   controls.model.selectedIndex = Math.max(preferred >= 0 ? preferred : runnable, 0);
-  element('modelNote').textContent = runnable > 0
-    ? 'This browser has no usable WebGPU, which the 8-bit models need: showing a float model instead.' : '';
+  const fallback = preferred < 0 && !runs(models.find((model) => model.opensFirst) ?? models[0]);
+  element('modelNote').textContent = fallback
+    ? 'This browser has no usable WebGPU, which the 8-bit models need, so the page is running a float model on a much slower backend. Use a current Chrome, Edge or Safari with WebGPU switched on.' : '';
   offerBackends();
   // Registered before the listeners that restart a run, so a run never starts on a stale backend.
   controls.model.addEventListener('change', offerBackends);

@@ -13,7 +13,8 @@ const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 async function requestAdapter() {
   if (!('gpu' in navigator)) return null;
   for (let attempt = 0; attempt < ADAPTER_ATTEMPTS; attempt += 1) {
-    const adapter = await navigator.gpu.requestAdapter();
+    // On a machine with two GPUs the default may be the slower, integrated one.
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (adapter) return adapter;
     await pause(ATTEMPT_INTERVAL_MS);
   }
