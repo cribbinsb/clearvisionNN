@@ -33,8 +33,6 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
   let gpu = null; // { device, runtime, schedule, lost }
   let stored = false; // whether the GPU holds the previous frame's output and state
   let shown = []; // the last frame's pictures, closed when the next replaces them
-  let settling = Promise.resolve(); // resolves when the GPU has finished the newest frame submitted
-  let network = 0; // ms from submitting a frame to the GPU finishing it, for the newest finished
 
   async function start() {
     const device = await requestDevice();
@@ -69,26 +67,20 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
         stored = false;
       }
       const prepared = performance.now();
-      const { schedule } = gpu;
-      const done = gpu.runtime.submit(frame, vectors, stored && !reset, levels, schedule.current());
+      const done = gpu.runtime.submit(frame, vectors, stored && !reset, levels, gpu.schedule.current());
       shown.forEach((picture) => picture.close());
-      // Taken at once: the canvases hold this frame only until they are next drawn to.
+      // Taken before the wait: the canvases hold this frame only until they are next drawn to.
       shown = canvases.map((canvas) => canvas.transferToImageBitmap());
-      stored = true;
-      // The pictures are handed back without waiting for the GPU to finish them: whoever draws
-      // them waits exactly as long as needed. Only the frame before is waited for, so that work
-      // never queues up behind a GPU that cannot keep pace.
-      const earlier = settling;
-      settling = done.then((computing) => {
-        network = performance.now() - prepared;
-        // The tuner goes by the GPU's own time where that is known: the wall
-        // clock also counts waiting behind other work, which no grouping changes.
-        schedule.record(computing ?? network);
-      });
-      await earlier;
+      // The pictures are handed back only once the GPU has finished them: a browser shows a
+      // picture drawn before then as black.
+      const computing = await done;
+      stored = !gpu.lost;
+      const finished = performance.now();
+      // The tuner goes by the GPU's own time where that is known: the wall
+      // clock also counts waiting behind other work, which no grouping changes.
+      gpu.schedule.record(computing ?? finished - prepared);
       const [conventional, upscaled] = shown;
-      // `network` is the newest frame the GPU has finished: this one's is not known yet.
-      return { conventional, upscaled, timings: { prepare: prepared - start0, network, finish: 0 } };
+      return { conventional, upscaled, timings: { prepare: prepared - start0, network: finished - prepared, finish: 0 } };
     },
     /** Forget earlier frames: the next one starts a new stream. */
     restart() {
@@ -98,7 +90,6 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
     /** Read back what the last frame produced (gpu-runtime.js): for checks only. */
     read: (names) => gpu.runtime.read(names),
     async release() {
-      await settling.catch(() => {});
       shown.forEach((picture) => picture.close());
       stop();
       search.free();
