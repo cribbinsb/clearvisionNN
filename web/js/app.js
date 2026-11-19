@@ -14,7 +14,6 @@ import { describe, loadModels } from './models.js';
 import { createPipelineHost } from './remote-pipeline.js';
 import { openSource } from './source.js';
 import { createStats } from './stats.js';
-import { tuningFrom } from './tuning.js';
 import { runUnattended } from './unattended.js';
 import { createView } from './view.js';
 
@@ -34,7 +33,18 @@ const stats = createStats(statCells());
 const host = createPipelineHost();
 
 let gpu = null; // the GPU the browser offers, in words
-const tuning = tuningFrom(new URLSearchParams(location.search));
+// Switches for finding out why a device is slow, from the address: `?weights=storage` binds the
+// 8-bit network's weights the slower, more widely proven way; `?packed=0` avoids the packed
+// dot-product built-ins; `?products=half`, `float` or `integer` fixes how the products are formed;
+// `?span=<n>` the pixels an invocation computes; `?tile=<n>` sets the tile size.
+const address = new URLSearchParams(location.search);
+const tuning = {
+  ...(address.get('weights') === 'storage' && { uniformWeights: false }),
+  ...(address.get('packed') === '0' && { packedDot: false }),
+  ...(address.has('products') && { floatProducts: address.get('products') === 'float', halfProducts: address.get('products') === 'half' }),
+  ...(address.has('tile') && { tile: Number(address.get('tile')) }),
+  ...(address.has('span') && { span: Number(address.get('span')) }),
+};
 let models = [];
 let backends = []; // those this browser can use
 let degrade = null;

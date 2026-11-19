@@ -6,7 +6,7 @@ const ADAPTER_ATTEMPTS = 8;
 const ATTEMPT_INTERVAL_MS = 250;
 
 // Asked for where the adapter offers them: timestamp queries time the GPU itself (gpu-timer.js);
-// 16-bit float shaders are what an Apple GPU runs the network fastest in (int8-forms.js).
+// 16-bit float shaders are what an Apple GPU runs the network fastest in (int8-shaders.js).
 const OPTIONAL_FEATURES = ['timestamp-query', 'shader-f16'];
 
 const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });

@@ -5,7 +5,6 @@
 import { requestDevice } from './gpu-device.js';
 import { parseIntegerModel } from './int8-model.js';
 import { createInt8Network } from './int8-network.js';
-import { planFor } from './int8-plan.js';
 import { createSchedule, groupCandidates } from './int8-schedule.js';
 
 /**
@@ -17,7 +16,7 @@ export async function createIntegerNetwork(model, width, height) {
   const device = await requestDevice();
   let network;
   try {
-    network = createInt8Network(device, parseIntegerModel(words), width, height, planFor(device));
+    network = createInt8Network(device, parseIntegerModel(words), width, height);
   } catch (error) {
     device.destroy();
     throw error;

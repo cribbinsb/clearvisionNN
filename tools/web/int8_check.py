@@ -38,13 +38,14 @@ def main() -> int:
     parser.add_argument("--clip", default="tos-bridge")
     parser.add_argument("--frames", type=int, default=6, help="frames compared, state fed back")
     parser.add_argument("--tiles", default="0,128,64", help="tile sides to check; 0: whole frame")
+    parser.add_argument("--timed-frames", type=int, default=40, help="timed runs per variant")
     parser.add_argument("--channel", default="chrome", help="Playwright browser channel")
     args = parser.parse_args()
     width, height = (int(side) for side in args.size.split("x"))
     request = {
         "directory": args.directory, "clip": args.clip, "frames": args.frames, "width": width,
         "height": height, "tiles": [int(tile) for tile in args.tiles.split(",")],
-        "differences": SCRIPT.with_name("differences.js").read_text(),
+        "timedFrames": args.timed_frames,
     }  # fmt: skip
     server = serve()
     with sync_playwright() as playwright:

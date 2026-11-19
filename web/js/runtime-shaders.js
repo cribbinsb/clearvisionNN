@@ -5,7 +5,7 @@
 // integer arithmetic defined in docs/INTEGER.md ("The runtime"); the
 // reference is cvnn_runtime::fixed, which these shaders must match bit for bit.
 
-import { packingHelpers } from './int8-forms.js';
+import { packingHelpers } from './int8-shaders.js';
 
 export const GROUP_SIDE = 8; // workgroup side, in samples
 const WORKGROUP = `@compute @workgroup_size(${GROUP_SIDE}, ${GROUP_SIDE})`;
