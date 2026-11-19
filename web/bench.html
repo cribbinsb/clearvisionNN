@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebGPU 8-bit layer benchmark</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+  pre { font: 12px/1.35 ui-monospace, Menlo, Consolas, monospace; white-space: pre; overflow-x: auto; background: #f4f4f4; padding: 12px; }
+  button { font: inherit; padding: 6px 12px; margin-right: 8px; }
+  @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } pre { background: #1c1c1c; } }
+</style>
+</head>
+<body>
+<h1>WebGPU 8-bit layer benchmark</h1>
+<p>Times one convolution layer of the medium model (640x360, 32 channels, 3x3) written many ways, with
+random weights and activations. It runs by itself and takes a minute or two (longer on a slow GPU).
+When the last line says <b>DONE</b>, press Copy and send the text. <span id="progress"></span></p>
+<p><button id="copy">Copy</button><button id="again">Run again</button></p>
+<pre id="out"></pre>
+<script>
+'use strict';
+// One self-contained file: no imports, no WebAssembly, no model. The shader generator below
+// reproduces web/js/int8-shaders.js's 'body' layer for the medium model as its base case; every
+// other row changes one thing about it.
+
+const FRAME = [640, 360];
+const TILE = 128;
+const HALO = 6;
+const WORDS = 8; // 32 channels, four signed bytes to a u32
+const TAPS = 9;
+const LAYERS = 15;
+const WEIGHT_VECTORS = TAPS * WORDS * WORDS; // vec4<u32> each: four outputs' weights of one input word
+const PAD = '0x80808080u';
+const REPEATS = 5;
+const CAP_MS = 3000; // a variant's repeats stop once it has used this much
+
+const range = (n) => [...Array(n).keys()];
+
+const PACKED = `
+fn dot8(a: u32, b: u32) -> i32 { return dot4I8Packed(a, b); }
+fn pack8(v: vec4<i32>) -> u32 { return pack4xI8Clamp(v); }
+fn unpack8(a: u32) -> vec4<i32> { return unpack4xI8(a); }`;
+const SPELT_OUT = `
+fn unpack8(a: u32) -> vec4<i32> { return vec4<i32>(vec4<u32>(a) << vec4<u32>(24u, 16u, 8u, 0u)) >> vec4<u32>(24u); }
+fn dot8(a: u32, b: u32) -> i32 { return dot(unpack8(a), unpack8(b)); }
+fn pack8(v: vec4<i32>) -> u32 {
+  let c = vec4<u32>(clamp(v, vec4<i32>(-128), vec4<i32>(127)) & vec4<i32>(255));
+  return c.x | (c.y << 8u) | (c.z << 16u) | (c.w << 24u);
+}`;
+const COMMON = `
+struct Params { frame: vec2<i32>, grid: vec2<i32>, tile: vec2<i32>, window: vec2<i32>, halo: i32, reach: i32, reachBelow: i32, firstTile: i32 }
+@group(1) @binding(0) var<uniform> p: Params;
+fn scaled(a: vec4<i32>, m: vec4<i32>) -> vec4<i32> {
+  return (a >> vec4<u32>(16u)) * m + (((a & vec4<i32>(65535)) * m) >> vec4<u32>(16u));
+}
+fn rounded(v: vec4<i32>, shift: vec4<i32>) -> vec4<i32> {
+  let s = vec4<u32>(shift);
+  return (v + vec4<i32>((vec4<u32>(1u) << s) >> vec4<u32>(1u))) >> s;
+}
+fn dots(x: u32, w: vec4<u32>) -> vec4<i32> {
+  return vec4<i32>(dot8(x, w.x), dot8(x, w.y), dot8(x, w.z), dot8(x, w.w));
+}
+fn column(w: vec4<u32>, shift: u32) -> vec4<i32> { return vec4<i32>(w << vec4<u32>(shift)) >> vec4<u32>(24u); }
+fn wconst(i: i32) -> vec4<u32> { return vec4<u32>(u32(i) + 1u) * vec4<u32>(2654435761u, 2246822519u, 3266489917u, 668265263u); }`;
+
+const DEFAULTS = {
+  products: 'packed', // packed | plain | columns | float | floatpre | scalar
+  weights: 'uniform', // uniform | storage | const | texture
+  src: 'buffer', // buffer | const | texture
+  write: 'requant', // requant | sum
+  loop: 'for', // for | unrolled | nested
+  wg: [8, 8],
+  span: 1,
+  layout: 'tiles', // tiles | whole
+  group: 0, // tiles per dispatch; 0: all of them
+  passes: 'one', // one | each
+  layers: 1,
+};
+
+/** Bindings of group 0 a config's shader declares: name -> binding number. */
+function bindingsOf(c) {
+  const used = { dst: 1, par: 3 };
+  if (c.src === 'buffer') used.src = 0;
+  if (c.src === 'texture') used.srcTex = 4;
+  if (c.weights === 'uniform' || c.weights === 'storage') used.wts = 2;
+  if (c.weights === 'texture') used.wtsTex = 5;
+  return used;
+}
+
+function declarations(c, packed) {
+  const type = c.products === 'floatpre' ? 'mat4x4<f32>' : 'vec4<u32>';
+  const lines = [];
+  if (c.src === 'buffer') lines.push('@group(0) @binding(0) var<storage, read> src: array<u32>;');
+  lines.push('@group(0) @binding(1) var<storage, read_write> dst: array<u32>;');
+  if (c.weights === 'uniform') lines.push(`@group(0) @binding(2) var<uniform> wts: array<${type}, ${WEIGHT_VECTORS}>;`);
+  if (c.weights === 'storage') lines.push(`@group(0) @binding(2) var<storage, read> wts: array<${type}>;`);
+  lines.push('@group(0) @binding(3) var<storage, read> par: array<vec4<i32>>;');
+  if (c.src === 'texture') lines.push('@group(0) @binding(4) var srcTex: texture_2d<u32>;');
+  if (c.weights === 'texture') lines.push('@group(0) @binding(5) var wtsTex: texture_2d<u32>;');
+  return `\n${lines.join('\n')}\n\n${packed ? PACKED : SPELT_OUT}\n${COMMON}`;
+}
+
+const weightAt = (c, i) => ({
+  uniform: `wts[${i}]`, storage: `wts[${i}]`, const: `wconst(${i})`,
+  texture: `textureLoad(wtsTex, vec2<i32>((${i}) & 63, (${i}) >> 6u), 0)`,
+})[c.weights];
+
+/** The input word `word` of pixel suffix `n` at the current tap. */
+const inputAt = (c, word, n = '') => ({
+  buffer: `select(${PAD}, src[b${n} + ${word}], ok${n})`,
+  const: `select(${PAD}, u32(b${n} + ${word}) * 2654435761u, ok${n})`,
+  texture: `select(${PAD}, textureLoad(srcTex, tc${n} + vec2<i32>(${word}, 0), 0).x, ok${n})`,
+})[c.src];
+
+/** The layer's own input at the pixel it writes (the block's identity path). */
+const ownAt = (c, k) => ({
+  buffer: `src[o + ${k}]`, const: `u32(o + ${k}) * 2654435761u`,
+  texture: `textureLoad(srcTex, vec2<i32>(l.x * ${WORDS} + ${k}, slot * p.window.y + l.y), 0).x`,
+})[c.src];
+
+function writes(c) {
+  const at = `let o = (base + l.y * p.window.x + l.x) * ${WORDS};`;
+  if (c.write === 'sum') return `${at}\n  ${range(WORDS).map((k) => `dst[o + ${k}] = bitcast<u32>(a${k}.x + a${k}.y + a${k}.z + a${k}.w);`).join('\n  ')}`;
+  return `${at}\n  ${range(WORDS).map((k) => `dst[o + ${k}] = pack8(rounded(scaled(a${k}, par[${WORDS + k}]) + par[${3 * WORDS + k}] * (unpack8(${ownAt(c, k)}) + 128), par[${2 * WORDS + k}]) - 128);`).join('\n  ')}`;
+}
+
+/** Declarations of the sums, the statements of one input word of one tap, and how the accumulators a0.. come out. */
+function products(c) {
+  const ks = range(WORDS);
+  const x = (word) => inputAt(c, word);
+  const w = (word) => `(t * ${WORDS} + ${word}) * ${WORDS}`;
+  if (c.products === 'packed' || c.products === 'plain') {
+    return {
+      declare: ks.map((k) => `var a${k} = par[${k}];`).join(' '),
+      word: (word) => `{ let x = ${x(word)}; let w = ${w(word)};\n      ${ks.map((k) => `a${k} += dots(x, ${weightAt(c, `w + ${k}`)});`).join('\n      ')} }`,
+      finish: '',
+    };
+  }
+  if (c.products === 'columns') {
+    return {
+      declare: ks.map((k) => `var a${k} = par[${k}];`).join(' '),
+      word: (word) => `{ let x = unpack8(${x(word)}); let w = ${w(word)};\n      ${ks.map((k) => `{ let m = ${weightAt(c, `w + ${k}`)}; a${k} += column(m, 24u) * x.x + column(m, 16u) * x.y + column(m, 8u) * x.z + column(m, 0u) * x.w; }`).join('\n      ')} }`,
+      finish: '',
+    };
+  }
+  if (c.products === 'float' || c.products === 'floatpre') {
+    const product = (k) => (c.products === 'floatpre' ? `f${k} += ${weightAt(c, `w + ${k}`)} * x;`
+      : `{ let m = ${weightAt(c, `w + ${k}`)}; f${k} += vec4<f32>(dot(x, vec4<f32>(unpack8(m.x))), dot(x, vec4<f32>(unpack8(m.y))), dot(x, vec4<f32>(unpack8(m.z))), dot(x, vec4<f32>(unpack8(m.w)))); }`);
+    return {
+      declare: ks.map((k) => `var f${k} = vec4<f32>(0);`).join(' '),
+      word: (word) => `{ let x = vec4<f32>(unpack8(${x(word)})); let w = ${w(word)};\n      ${ks.map(product).join('\n      ')} }`,
+      finish: ks.map((k) => `let a${k} = par[${k}] + vec4<i32>(f${k});`).join(' '),
+    };
+  }
+  // scalar: no vectors anywhere in the products
+  const lanes = ['x', 'y', 'z', 'w'];
+  const byte = (v, i) => `(i32(${v} << ${24 - 8 * i}u) >> 24u)`;
+  return {
+    declare: ks.map((k) => lanes.map((lane) => `var a${k}${lane} = par[${k}].${lane};`).join(' ')).join(' '),
+    word: (word) => `{ let x = ${x(word)}; let x0 = ${byte('x', 0)}; let x1 = ${byte('x', 1)}; let x2 = ${byte('x', 2)}; let x3 = ${byte('x', 3)}; let w = ${w(word)};\n      ${ks.map((k) => `{ let m = ${weightAt(c, `w + ${k}`)}; ${lanes.map((lane) => `a${k}${lane} += x0 * ${byte(`m.${lane}`, 0)} + x1 * ${byte(`m.${lane}`, 1)} + x2 * ${byte(`m.${lane}`, 2)} + x3 * ${byte(`m.${lane}`, 3)};`).join(' ')} }`).join('\n      ')} }`,
+    finish: ks.map((k) => `let a${k} = vec4<i32>(${lanes.map((lane) => `a${k}${lane}`).join(', ')});`).join(' '),
+  };
+}
+
+/** The body layer for config `c`. With DEFAULTS this is the shader the page runs today. */
+function bodyShader(c, packedAvailable) {
+  const packed = c.products === 'packed' && packedAvailable;
+  if (c.span > 1) return spanShader(c, packed);
+  const made = products(c);
+  const tapHead = `let gg = g + d;
+    let ok = all(gg >= vec2<i32>(0)) && all(gg < p.frame) && all(c + d >= vec2<i32>(-p.reachBelow)) && all(c + d < p.tile + p.reachBelow);
+    let b = select(0, (base + (l.y + d.y) * p.window.x + l.x + d.x) * ${WORDS}, ok);${c.src === 'texture' ? `
+    let tc = select(vec2<i32>(0), vec2<i32>((l.x + d.x) * ${WORDS}, slot * p.window.y + l.y + d.y), ok);` : ''}`;
+  let taps;
+  if (c.loop === 'nested') {
+    taps = `var acc: array<vec4<i32>, ${WORDS}>;
+  for (var k = 0; k < ${WORDS}; k++) { acc[k] = par[k]; }
+  for (var t = 0; t < ${TAPS}; t++) {
+    let d = vec2<i32>(t % 3 - 1, t / 3 - 1);
+    ${tapHead}
+    for (var word = 0; word < ${WORDS}; word++) {
+      let x = ${inputAt(c, 'word')};
+      let w = (t * ${WORDS} + word) * ${WORDS};
+      for (var k = 0; k < ${WORDS}; k++) { acc[k] += dots(x, ${weightAt(c, 'w + k')}); }
+    }
+  }
+  ${range(WORDS).map((k) => `let a${k} = acc[${k}];`).join(' ')}`;
+  } else {
+    const body = `${tapHead}\n    ${range(WORDS).map(made.word).join('\n    ')}`;
+    const loop = c.loop === 'unrolled'
+      ? range(TAPS).map((t) => `{ const t = ${t}; let d = vec2<i32>(${(t % 3) - 1}, ${Math.floor(t / 3) - 1});\n    ${body}\n  }`).join('\n  ')
+      : `for (var t = 0; t < ${TAPS}; t++) {\n    let d = vec2<i32>(t % 3 - 1, t / 3 - 1);\n    ${body}\n  }`;
+    taps = `${made.declare}\n  ${loop}\n  ${made.finish}`;
+  }
+  return `${declarations(c, packed)}
+@compute @workgroup_size(${c.wg[0]}, ${c.wg[1]}, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let l = vec2<i32>(gid.xy);
+  let slot = i32(gid.z);
+  let index = p.firstTile + slot;
+  if (index >= p.grid.x * p.grid.y) { return; }
+  let c = l - p.halo;
+  let g = vec2<i32>(index % p.grid.x, index / p.grid.x) * p.tile + c;
+  if (any(c < vec2<i32>(-p.reach)) || any(c >= p.tile + p.reach) || any(g < vec2<i32>(0)) || any(g >= p.frame)) { return; }
+  let base = slot * p.window.x * p.window.y;
+  ${taps}
+  ${writes(c)}
+}`;
+}
+
+/** The same layer with `c.span` pixels of a row to an invocation, so that each weight read serves them all. */
+function spanShader(c, packed) {
+  const pixels = range(c.span);
+  const ks = range(WORDS);
+  const float = c.products === 'floatpre';
+  const columns = c.products === 'columns';
+  const input = (word, n) => (float ? `vec4<f32>(unpack8(${inputAt(c, word, n)}))` : columns ? `unpack8(${inputAt(c, word, n)})` : inputAt(c, word, n));
+  const product = (n) => (float ? `m * x${n}` : columns ? `w0 * x${n}.x + w1 * x${n}.y + w2 * x${n}.z + w3 * x${n}.w` : `dots(x${n}, m)`);
+  const unpackColumns = columns ? ' let w0 = column(m, 24u); let w1 = column(m, 16u); let w2 = column(m, 8u); let w3 = column(m, 0u);' : '';
+  const words = range(WORDS).map((word) => `{ let w = (t * ${WORDS} + ${word}) * ${WORDS};
+      ${pixels.map((n) => `let x${n} = ${input(word, n)};`).join(' ')}
+      ${ks.map((k) => `{ let m = ${weightAt(c, `w + ${k}`)};${unpackColumns} ${pixels.map((n) => `s${n}_${k} += ${product(n)};`).join(' ')} }`).join('\n      ')} }`);
+  return `${declarations(c, packed)}
+fn finish(l: vec2<i32>, slot: i32, base: i32, ${ks.map((k) => `a${k}: vec4<i32>`).join(', ')}) {
+  ${writes(c)}
+}
+@compute @workgroup_size(${c.wg[0]}, ${c.wg[1]}, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let slot = i32(gid.z);
+  let index = p.firstTile + slot;
+  if (index >= p.grid.x * p.grid.y) { return; }
+  let first = vec2<i32>(i32(gid.x) * ${c.span}, i32(gid.y));
+  let corner = vec2<i32>(index % p.grid.x, index / p.grid.x) * p.tile;
+  ${pixels.map((n) => `let l${n} = first + vec2<i32>(${n}, 0); let c${n} = l${n} - p.halo; let g${n} = corner + c${n};
+  let live${n} = all(c${n} >= vec2<i32>(-p.reach)) && all(c${n} < p.tile + p.reach) && all(g${n} >= vec2<i32>(0)) && all(g${n} < p.frame);`).join('\n  ')}
+  if (!(${pixels.map((n) => `live${n}`).join(' || ')})) { return; }
+  let base = slot * p.window.x * p.window.y;
+  ${pixels.map((n) => ks.map((k) => `var s${n}_${k} = ${float ? 'vec4<f32>' : 'vec4<i32>'}(0);`).join(' ')).join('\n  ')}
+  for (var t = 0; t < ${TAPS}; t++) {
+    let d = vec2<i32>(t % 3 - 1, t / 3 - 1);
+    ${pixels.map((n) => `let gg${n} = g${n} + d; let ok${n} = all(gg${n} >= vec2<i32>(0)) && all(gg${n} < p.frame) && all(c${n} + d >= vec2<i32>(-p.reachBelow)) && all(c${n} + d < p.tile + p.reachBelow); let b${n} = select(0, (base + (l${n}.y + d.y) * p.window.x + l${n}.x + d.x) * ${WORDS}, ok${n});${c.src === 'texture' ? ` let tc${n} = select(vec2<i32>(0), vec2<i32>((l${n}.x + d.x) * ${WORDS}, slot * p.window.y + l${n}.y + d.y), ok${n});` : ''}`).join('\n    ')}
+    ${words.join('\n    ')}
+  }
+  ${pixels.map((n) => `if (live${n}) { finish(l${n}, slot, base, ${ks.map((k) => `par[${k}] + ${float ? `vec4<i32>(s${n}_${k})` : `s${n}_${k}`}`).join(', ')}); }`).join('\n  ')}
+}`;
+}
+
+/**
+ * Reference shaders with the layer's shape of dispatch but almost no memory access: what the
+ * GPU's arithmetic alone, or its buffer reads alone, cost. Each invocation does the layer's
+ * count of the operation (2304 vec4 steps = 9216 scalar ones).
+ */
+function rawShader(kind, packedAvailable) {
+  const steps = WEIGHT_VECTORS * 4; // 2304: one for each (tap, input word, output word, pixel)
+  const bodies = {
+    imad: ['var a = vec4<i32>(gid.xyxy);', `a = a * m + vec4<i32>(i);`, 'a'],
+    fmad: ['var a = vec4<f32>(gid.xyxy);', `a = a * 0.999 + vec4<f32>(f32(i));`, 'vec4<i32>(a)'],
+    shifts: ['var a = vec4<i32>(gid.xyxy);', `a = ((a << vec4<u32>(8u)) >> vec4<u32>(24u)) + (a ^ vec4<i32>(i));`, 'a'],
+    dot4: ['var a = vec4<i32>(gid.xyxy);', `a += dots(u32(i) * 2654435761u, vec4<u32>(a));`, 'a'],
+    loads: ['var a = vec4<i32>(gid.xyxy);', `a ^= vec4<i32>(wts[i % ${WEIGHT_VECTORS}]);`, 'a'],
+    loadsStorage: ['var a = vec4<i32>(gid.xyxy);', 'a ^= vec4<i32>(i32(big[(o + i * 8) & 1048575]));', 'a'],
+  };
+  const [declare, step, result] = bodies[kind];
+  return `
+@group(0) @binding(1) var<storage, read_write> dst: array<u32>;
+${kind === 'loads' ? `@group(0) @binding(2) var<uniform> wts: array<vec4<u32>, ${WEIGHT_VECTORS}>;` : ''}
+${kind === 'loadsStorage' ? '@group(0) @binding(0) var<storage, read> big: array<u32>;' : ''}
+@group(0) @binding(3) var<storage, read> par: array<vec4<i32>>;
+${packedAvailable ? PACKED : SPELT_OUT}
+${COMMON}
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let l = vec2<i32>(gid.xy);
+  let slot = i32(gid.z);
+  if (any(l >= p.window)) { return; }
+  let o = (slot * p.window.x * p.window.y + l.y * p.window.x + l.x) * ${WORDS};
+  let m = par[${WORDS}];
+  ${declare}
+  for (var i = 0; i < ${steps}; i++) { ${step} }
+  let r = ${result};
+  dst[o] = bitcast<u32>(r.x + r.y + r.z + r.w);
+}`;
+}
+
+/** The rows of the table: [label, config or { raw }]. */
+function ladder() {
+  const v = (label, changes = {}) => [label, { ...DEFAULTS, ...changes }];
+  return [
+    v('A1 body layer as the page runs it (packed dot, uniform weights, 8x8, one dispatch)'),
+    v('A2 the 15-layer chain of A1, one pass', { layers: LAYERS }),
+    v('A3 plain products (no packed built-ins)', { products: 'plain' }),
+    v('A4 storage weights', { weights: 'storage' }),
+    v('B1 weights computed, no weight buffer', { weights: 'const' }),
+    v('B2 activations computed, no src reads', { src: 'const' }),
+    v('B3 neither weights nor src read', { weights: 'const', src: 'const' }),
+    v('B4 no requantise/pack: writes a plain sum', { write: 'sum' }),
+    v('B5 B3 + plain sum (arithmetic only)', { weights: 'const', src: 'const', write: 'sum' }),
+    v('C1 tap loop unrolled (no for)', { loop: 'unrolled' }),
+    v('C2 loops over taps, words and outputs (accumulator array)', { loop: 'nested' }),
+    v('D1 integer products, weights unpacked once to columns', { products: 'columns' }),
+    v('D2 f32 products, weights unpacked in the shader', { products: 'float' }),
+    v('D3 f32 products, weights stored as f32 matrices (uniform)', { products: 'floatpre' }),
+    v('D4 D3 with storage weights', { products: 'floatpre', weights: 'storage' }),
+    v('D5 scalar i32 code, no vectors', { products: 'scalar' }),
+    v('D6 D3 + computed src + plain sum (f32 arithmetic and weight reads only)', { products: 'floatpre', src: 'const', write: 'sum' }),
+    v('E1 activations from an r32uint texture', { src: 'texture' }),
+    v('E2 weights from an rgba32uint texture', { weights: 'texture' }),
+    v('E3 both from textures', { src: 'texture', weights: 'texture' }),
+    v('F1 workgroup 16x16', { wg: [16, 16] }),
+    v('F2 workgroup 4x4', { wg: [4, 4] }),
+    v('F3 workgroup 64x1', { wg: [64, 1] }),
+    v('F4 whole frame as one tile, one dispatch', { layout: 'whole' }),
+    v('F5 two tiles a dispatch, one pass', { group: 2 }),
+    v('F6 two tiles a dispatch, a pass each', { group: 2, passes: 'each' }),
+    v('F7 15-layer chain, a pass for each layer', { layers: LAYERS, passes: 'each' }),
+    v('F8 15-layer chain, whole frame as one tile', { layers: LAYERS, layout: 'whole' }),
+    v('G1 2 pixels an invocation, integer columns', { products: 'columns', span: 2 }),
+    v('G2 4 pixels an invocation, integer columns', { products: 'columns', span: 4 }),
+    v('G3 2 pixels an invocation, f32 matrices', { products: 'floatpre', span: 2 }),
+    v('G4 4 pixels an invocation, f32 matrices', { products: 'floatpre', span: 4 }),
+    v('G5 15-layer chain of D3', { products: 'floatpre', layers: LAYERS }),
+    v('G6 15-layer chain of G3', { products: 'floatpre', span: 2, layers: LAYERS }),
+    ['R1 raw: 2304 vec4<i32> multiply-adds an invocation, no memory', { ...DEFAULTS, raw: 'imad' }],
+    ['R2 raw: 2304 vec4<f32> multiply-adds', { ...DEFAULTS, raw: 'fmad' }],
+    ['R3 raw: 2304 vec4 shift pairs + add', { ...DEFAULTS, raw: 'shifts' }],
+    ['R4 raw: 2304 x 4 packed dot products on registers', { ...DEFAULTS, raw: 'dot4' }],
+    ['R5 raw: 2304 vec4 reads of the uniform weights', { ...DEFAULTS, raw: 'loads' }],
+    ['R6 raw: 2304 u32 reads of a storage buffer', { ...DEFAULTS, raw: 'loadsStorage' }],
+  ];
+}
+
+// ---- running ----
+
+const out = typeof document === 'undefined' ? null : document.getElementById('out');
+const say = (line) => { out.textContent += `${line}\n`; };
+const median = (values) => [...values].sort((a, b) => a - b)[values.length >> 1];
+const fmt = (value) => (value === null || value === undefined || !Number.isFinite(value) ? '      –' : value.toFixed(value < 10 ? 2 : 1).padStart(7));
+
+function randomWords(count, seed) {
+  const words = new Uint32Array(count);
+  let state = seed;
+  for (let i = 0; i < count; i += 1) {
+    state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+    words[i] = state;
+  }
+  return words;
+}
+
+/** The geometry of a layout: tiles as the page deploys the medium model, or the whole frame as one. */
+function geometry(layout) {
+  if (layout === 'whole') return { tile: FRAME, grid: [1, 1], window: FRAME, halo: 0, tiles: 1 };
+  const grid = [Math.ceil(FRAME[0] / TILE), Math.ceil(FRAME[1] / TILE)];
+  return { tile: [TILE, TILE], grid, window: [TILE + 2 * HALO, TILE + 2 * HALO], halo: HALO, tiles: grid[0] * grid[1] };
+}
+
+async function setUp() {
+  // Chrome can answer "no adapter" while its GPU process is still starting.
+  let adapter = null;
+  for (let attempt = 0; attempt < 12 && !adapter; attempt += 1) {
+    adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) await new Promise((resolve) => { setTimeout(resolve, 250); });
+  }
+  if (!adapter) throw new Error('No WebGPU adapter (see chrome://gpu).');
+  const timestamps = adapter.features.has('timestamp-query');
+  const device = await adapter.requestDevice({ requiredFeatures: timestamps ? ['timestamp-query'] : [] });
+  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  const tiled = geometry('tiles');
+  const scratchWords = Math.max(tiled.tiles * tiled.window[0] * tiled.window[1], FRAME[0] * FRAME[1]) * WORDS;
+  const filled = (data, use) => {
+    const buffer = device.createBuffer({ size: data.byteLength, usage: use | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buffer, 0, data);
+    return buffer;
+  };
+  const activations = randomWords(scratchWords, 0x1234567);
+  const packedWeights = randomWords(WEIGHT_VECTORS * 4, 0x7654321);
+  const floatWeights = new Float32Array(WEIGHT_VECTORS * 16);
+  packedWeights.forEach((word, index) => {
+    const output = index % 4;
+    for (let channel = 0; channel < 4; channel += 1) floatWeights[(index - output) * 4 + channel * 4 + output] = (word << (24 - 8 * channel)) >> 24;
+  });
+  // Bias, multiplier, shift, identity: values of the size a real layer's have.
+  const par = new Int32Array(4 * WORDS * 4);
+  for (let i = 0; i < WORDS * 4; i += 1) {
+    par[i] = (i * 7919) % 2001 - 1000;
+    par[WORDS * 4 + i] = 20000 + i * 300;
+    par[2 * WORDS * 4 + i] = 9;
+    par[3 * WORDS * 4 + i] = 200 + i;
+  }
+  // The activations as a texture: a row per window row of each tile, a texel per word.
+  const texSize = [tiled.window[0] * WORDS, tiled.tiles * tiled.window[1]];
+  const srcTex = device.createTexture({ size: texSize, format: 'r32uint', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  device.queue.writeTexture({ texture: srcTex }, activations, { bytesPerRow: texSize[0] * 4 }, texSize);
+  const wtsTex = device.createTexture({ size: [64, WEIGHT_VECTORS / 64], format: 'rgba32uint', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  device.queue.writeTexture({ texture: wtsTex }, packedWeights, { bytesPerRow: 64 * 16 }, [64, WEIGHT_VECTORS / 64]);
+  return {
+    adapter, device, timestamps,
+    packed: navigator.gpu.wgslLanguageFeatures?.has('packed_4x8_integer_dot_product') ?? false,
+    scratch: [filled(activations, usage), filled(randomWords(scratchWords, 0x2468ace), usage)],
+    weights: {
+      'uniform:int': filled(packedWeights, GPUBufferUsage.UNIFORM), 'storage:int': filled(packedWeights, GPUBufferUsage.STORAGE),
+      'uniform:float': filled(floatWeights, GPUBufferUsage.UNIFORM), 'storage:float': filled(floatWeights, GPUBufferUsage.STORAGE),
+    },
+    par: filled(par, GPUBufferUsage.STORAGE),
+    srcTex: srcTex.createView(), wtsTex: wtsTex.createView(),
+    querySet: timestamps ? device.createQuerySet({ type: 'timestamp', count: 2 }) : null,
+    resolved: timestamps ? device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }) : null,
+  };
+}
+
+/** Compile config `c` and return `{ compileMs, run(stamped) }`; `run` resolves to `{ wall, stamp }` in ms. */
+async function prepare(gpu, c) {
+  const { device } = gpu;
+  const code = c.raw ? rawShader(c.raw, gpu.packed) : bodyShader(c, gpu.packed);
+  const module = device.createShaderModule({ code });
+  const started = performance.now();
+  const pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' } });
+  const compileMs = performance.now() - started;
+  const geo = geometry(c.layout);
+  const used = c.raw ? { dst: 1, par: 3, ...(c.raw === 'loads' && { wts: 2 }), ...(c.raw === 'loadsStorage' && { src: 0 }) } : bindingsOf(c);
+  const weights = gpu.weights[`${c.weights === 'storage' ? 'storage' : 'uniform'}:${c.products === 'floatpre' ? 'float' : 'int'}`];
+  const group0 = (from, to) => device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: Object.entries(used).map(([name, binding]) => ({
+      binding,
+      resource: name === 'srcTex' ? gpu.srcTex : name === 'wtsTex' ? gpu.wtsTex
+        : { buffer: { src: gpu.scratch[from], dst: gpu.scratch[to], wts: weights, par: gpu.par }[name] },
+    })),
+  });
+  const directions = [group0(0, 1), group0(1, 0)];
+  const perGroup = c.group || geo.tiles;
+  const groups = Math.ceil(geo.tiles / perGroup);
+  const parameters = range(groups).map((group) => {
+    const block = new Int32Array([...FRAME, ...geo.grid, ...geo.tile, ...geo.window, geo.halo, geo.halo, geo.halo, group * perGroup]);
+    const buffer = device.createBuffer({ size: block.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buffer, 0, block);
+    return device.createBindGroup({ layout: pipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] });
+  });
+  const counts = [Math.ceil(geo.window[0] / (c.wg[0] * c.span)), Math.ceil(geo.window[1] / c.wg[1])];
+  // Every dispatch of the run, in order: [bind group 0, bind group 1, depth].
+  const dispatches = range(c.layers).flatMap((layer) => range(groups).map((group) => (
+    [directions[layer % 2], parameters[group], Math.min(perGroup, geo.tiles - group * perGroup)])));
+  const passes = c.passes === 'each' ? dispatches.map((dispatch) => [dispatch]) : [dispatches];
+
+  async function run(stamped) {
+    const encoder = device.createCommandEncoder();
+    passes.forEach((list, index) => {
+      const writes = { querySet: gpu.querySet };
+      if (index === 0) writes.beginningOfPassWriteIndex = 0;
+      if (index === passes.length - 1) writes.endOfPassWriteIndex = 1;
+      const timed = stamped && (index === 0 || index === passes.length - 1);
+      const pass = encoder.beginComputePass(timed ? { timestampWrites: writes } : {});
+      pass.setPipeline(pipeline);
+      list.forEach(([group, params, depth]) => {
+        pass.setBindGroup(0, group);
+        pass.setBindGroup(1, params);
+        pass.dispatchWorkgroups(counts[0], counts[1], depth);
+      });
+      pass.end();
+    });
+    let staging = null;
+    if (stamped) {
+      staging = device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+      encoder.resolveQuerySet(gpu.querySet, 0, 2, gpu.resolved, 0);
+      encoder.copyBufferToBuffer(gpu.resolved, 0, staging, 0, 16);
+    }
+    const start = performance.now();
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+    const wall = performance.now() - start;
+    let stamp = null;
+    if (staging) {
+      await staging.mapAsync(GPUMapMode.READ);
+      const [begin, end] = new BigInt64Array(staging.getMappedRange());
+      stamp = end > begin ? Number(end - begin) * 1e-6 : null;
+      staging.destroy();
+    }
+    return { wall, stamp };
+  }
+  return { compileMs, run, dispatches: dispatches.length, passes: passes.length };
+}
+
+/** Time one row; returns its line of the table. */
+async function measure(gpu, label, c) {
+  const { device } = gpu;
+  device.pushErrorScope('validation');
+  const row = { wall: [], stamp: [], stampedWall: [] };
+  let note = '';
+  try {
+    const made = await prepare(gpu, c);
+    const first = await made.run(false); // also finishes compiling on some backends
+    let spent = first.wall;
+    for (let repeat = 0; repeat < REPEATS && (repeat === 0 || spent < CAP_MS); repeat += 1) {
+      const plain = await made.run(false);
+      row.wall.push(plain.wall);
+      spent += plain.wall;
+      if (gpu.timestamps) {
+        const stamped = await made.run(true);
+        if (stamped.stamp !== null) row.stamp.push(stamped.stamp);
+        row.stampedWall.push(stamped.wall);
+        spent += stamped.wall;
+      }
+    }
+    note = `compile ${made.compileMs.toFixed(0)} ms, first run ${first.wall.toFixed(0)} ms, ${made.dispatches} dispatch${made.dispatches > 1 ? 'es' : ''} in ${made.passes} pass${made.passes > 1 ? 'es' : ''}, ${row.wall.length} runs`;
+  } catch (error) {
+    note = `ERROR ${String(error.message ?? error).slice(0, 300)}`;
+  }
+  const failure = await device.popErrorScope();
+  if (failure) note = `VALIDATION ERROR ${failure.message.slice(0, 300)}`;
+  const cell = (values) => (values.length ? `${fmt(Math.min(...values))} ${fmt(median(values))}` : `${fmt(null)} ${fmt(null)}`);
+  return { label, line: `${cell(row.stamp)} | ${cell(row.wall)} | ${fmt(row.stampedWall.length ? Math.min(...row.stampedWall) : null)} | ${label} [${note}]`, row };
+}
+
+async function main() {
+  out.textContent = '';
+  const progress = document.getElementById('progress');
+  document.body.removeAttribute('data-done');
+  say(`WebGPU 8-bit layer benchmark, ${new Date().toISOString()}`);
+  say(navigator.userAgent);
+  if (!navigator.gpu) { say('This browser has no WebGPU (navigator.gpu is missing).'); document.body.dataset.done = 'true'; return; }
+  const gpu = await setUp();
+  const info = gpu.adapter.info ?? {};
+  say(`adapter: vendor=${info.vendor} architecture=${info.architecture} device=${info.device} description=${info.description}`);
+  say(`features: ${[...gpu.adapter.features].join(' ')}`);
+  say(`wgsl language features: ${[...(navigator.gpu.wgslLanguageFeatures ?? [])].join(' ')}`);
+  const limits = ['maxUniformBufferBindingSize', 'maxStorageBufferBindingSize', 'maxBufferSize', 'maxComputeInvocationsPerWorkgroup', 'maxComputeWorkgroupSizeX', 'maxComputeWorkgroupsPerDimension', 'maxStorageBuffersPerShaderStage'];
+  say(`limits: ${limits.map((name) => `${name}=${gpu.device.limits[name]}`).join(' ')}`);
+  say(`timestamp queries: ${gpu.timestamps ? 'yes' : 'NO (wall clock only)'} · packed dot built-ins: ${gpu.packed ? 'yes' : 'NO (rows that ask for them use plain products)'}`);
+  say('');
+  say('One layer is 15 tiles of 140x140 (the page\'s tiling of 640x360), 9216 multiply-accumulates a pixel.');
+  say('Times in ms. stamp = GPU timestamps around the pass(es); wall = submit to onSubmittedWorkDone, without');
+  say('timestamp writes; wall+ts = quickest wall with timestamp writes on.');
+  say('');
+  say('stamp min  median | wall min  median | wall+ts | variant');
+  const rows = [];
+  const all = ladder();
+  for (const [index, [label, config]] of all.entries()) {
+    progress.textContent = `Running ${index + 1} of ${all.length}…`;
+    const result = await measure(gpu, label, config);
+    rows.push(result);
+    say(result.line);
+    await new Promise((resolve) => { setTimeout(resolve, 0); });
+  }
+  const best = (row) => (row.stamp.length ? Math.min(...row.stamp) : row.wall.length ? Math.min(...row.wall) : null);
+  const base = best(rows[0].row);
+  say('');
+  say('Relative to A1 (quickest stamp, else wall): below 1 is quicker than the page\'s shader.');
+  rows.forEach(({ label, row }) => { const time = best(row); say(`${time === null || !base ? '    –' : (time / base).toFixed(3).padStart(8)}  ${label.split(' ')[0]}`); });
+  say('');
+  say('DONE');
+  progress.textContent = 'Finished.';
+  document.body.dataset.done = 'true';
+}
+
+if (out) {
+  document.getElementById('copy').addEventListener('click', () => navigator.clipboard.writeText(out.textContent));
+  document.getElementById('again').addEventListener('click', () => main().catch((error) => say(`FAILED: ${error.message ?? error}`)));
+  main().catch((error) => { say(`FAILED: ${error.message ?? error}`); document.body.dataset.done = 'true'; });
+}
+</script>
+</body>
+</html>
