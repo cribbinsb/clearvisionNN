@@ -44,12 +44,14 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
   async function start() {
     const device = await requestDevice();
     const slowIntegers = FLOAT_PRODUCT_VENDORS.includes(device.adapterInfo?.vendor);
-    const floatProducts = options.floatProducts ?? slowIntegers;
+    // 16-bit float where the GPU has it, 32-bit float otherwise.
+    const halfProducts = options.halfProducts ?? (slowIntegers && options.floatProducts === undefined && device.features.has('shader-f16'));
+    const floatProducts = options.floatProducts ?? (slowIntegers && !halfProducts);
     // With float products, several pixels to an invocation: each weight read then serves them all.
-    const span = options.span ?? (floatProducts ? FLOAT_SPAN : 1);
+    const span = options.span ?? (floatProducts || halfProducts ? FLOAT_SPAN : 1);
     try {
-      const runtime = createGpuRuntime(device, parsed, model, width, height, canvases, { ...options, floatProducts, span });
-      const variant = `${floatProducts ? 'float' : 'integer'} products, ${span} to an invocation`;
+      const runtime = createGpuRuntime(device, parsed, model, width, height, canvases, { ...options, floatProducts, halfProducts, span });
+      const variant = `${halfProducts ? '16-bit float' : floatProducts ? 'float' : 'integer'} products, ${span} to an invocation`;
       const started = { device, runtime, variant, schedule: createSchedule(groupCandidates(runtime.tiles)), lost: false };
       device.lost.then(() => { started.lost = true; });
       return started;

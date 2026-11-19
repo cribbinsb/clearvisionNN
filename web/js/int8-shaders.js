@@ -87,6 +87,27 @@ export function floatWeights(packed) {
   return floats;
 }
 
+// In 16-bit float the bytes are scaled to within one, so the sums stay in range; the sum is
+// brought back to whole numbers by this, the product of the two scales.
+const HALF_SCALE = 128;
+
+/**
+ * A layer's weights as the 16-bit float shaders read them: `floatWeights`, each divided by
+ * 128 and written as the bits of a half float (exact: a signed byte over 128 has few digits).
+ */
+export function halfWeights(packed) {
+  const floats = floatWeights(packed);
+  const halves = new Uint16Array(floats.length);
+  floats.forEach((weight, index) => {
+    const magnitude = Math.abs(weight);
+    if (magnitude === 0) return;
+    // weight / 128 = 1.m * 2^(top - 7), `top` being the magnitude's highest set bit.
+    const top = 31 - Math.clz32(magnitude);
+    halves[index] = (weight < 0 ? 0x8000 : 0) | ((top - 7 + 15) << 10) | ((magnitude << (10 - top)) & 0x3ff);
+  });
+  return halves;
+}
+
 /** How each way of forming the products declares the weights, holds an input word and its sums, and multiplies. */
 const PRODUCTS = {
   packed: { weights: 'vec4<u32>', sum: 'vec4<i32>', input: (word) => word, whole: (sum) => sum, columns: '', product: (x) => `dots(${x}, m)` },
@@ -94,6 +115,12 @@ const PRODUCTS = {
     weights: 'vec4<u32>', sum: 'vec4<i32>', input: (word) => `unpack8(${word})`, whole: (sum) => sum,
     columns: ' let w0 = column(m, 24u); let w1 = column(m, 16u); let w2 = column(m, 8u); let w3 = column(m, 0u);',
     product: (x) => `w0 * ${x}.x + w1 * ${x}.y + w2 * ${x}.z + w3 * ${x}.w`,
+  },
+  // Not exact: a 16-bit float holds eleven binary digits, which moves a layer's output by at most
+  // one step of its 8-bit scale. It is what an Apple GPU runs fastest by far.
+  half: {
+    weights: 'mat4x4<f16>', sum: 'vec4<f16>', input: (word) => `(vec4<f16>(unpack8(${word})) * ${1 / HALF_SCALE}h)`,
+    whole: (sum) => `vec4<i32>(round(vec4<f32>(${sum}) * ${HALF_SCALE * HALF_SCALE}.0))`, columns: '', product: (x) => `m * ${x}`,
   },
   float: { weights: 'mat4x4<f32>', sum: 'vec4<f32>', input: (word) => `vec4<f32>(unpack8(${word}))`, whole: (sum) => `vec4<i32>(${sum})`, columns: '', product: (x) => `m * ${x}` },
 };
@@ -163,14 +190,15 @@ function writes(kind, shape) {
  * word counts (int8-model.js). `packedDot` says whether the packed built-ins
  * exist, `uniformWeights` whether the weights are bound as a uniform buffer,
  * `floatProducts` whether the products are formed in floating point (the
- * weights are then `floatWeights`), and `span` how many pixels of a row an
+ * weights are then `floatWeights`), `halfProducts` whether in 16-bit floating
+ * point (`halfWeights`; not exact), and `span` how many pixels of a row an
  * invocation computes. Throws if floating point would not be exact.
  */
-export function layerShader(kind, shape, { packedDot, uniformWeights, floatProducts = false, span = 1 }) {
+export function layerShader(kind, shape, { packedDot, uniformWeights, floatProducts = false, halfProducts = false, span = 1 }) {
   const outputWords = kind === 'head' ? 1 + shape.stateWords : shape.trunkWords;
   const read = reading(kind, shape);
   if (floatProducts && TAPS * 4 * read.words * LARGEST_PRODUCT > FLOAT_EXACT) throw new Error('A layer this wide is not exact in floating point.');
-  const products = PRODUCTS[floatProducts ? 'float' : packedDot ? 'packed' : 'plain'];
+  const products = PRODUCTS[halfProducts ? 'half' : floatProducts ? 'float' : packedDot ? 'packed' : 'plain'];
   const pixels = range(span);
   const outputs = range(outputWords);
   const bounded = kind === 'head' && shape.stateWords
@@ -179,7 +207,7 @@ fn bounded(magnitude: i32) -> i32 { return i32((tanhTable[magnitude >> 2u] >> (u
   const words = range(read.words).map((word) => `{ let w = (t * ${read.words} + ${word}) * ${outputWords};
       ${pixels.map((n) => `let x${n} = ${products.input(`select(${read.pad(word)}, src[b${n} + ${word}], ok${n})`)};`).join(' ')}
       ${outputs.map((k) => `{ let m = wts[w + ${k}];${products.columns} ${pixels.map((n) => `${read.sums(word)}${n}_${k} += ${products.product(`x${n}`)};`).join(' ')} }`).join('\n      ')} }`);
-  return `
+  return `${halfProducts ? 'enable f16;' : ''}
 @group(0) @binding(0) var<storage, read> src: array<u32>;
 @group(0) @binding(1) var<storage, read_write> dst: array<u32>;
 ${weightsBinding(products.weights, TAPS * read.words * outputWords, uniformWeights)}

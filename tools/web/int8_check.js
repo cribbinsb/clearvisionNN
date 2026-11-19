@@ -42,7 +42,7 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
     // The float form of the products (what an Apple GPU runs) must give the same words, with the
     // weights bound either way.
     for (const uniformWeights of [true, false]) {
-      const float = createInt8Network(device, model, width, height, { tile, floatProducts: true, uniformWeights });
+      const float = createInt8Network(device, model, width, height, { tile, floatProducts: true, uniformWeights, span: 4 });
       variants.push({ tile, group: float.tiles, network: float, packedDot: float.packedDot, float: uniformWeights ? 'uniform' : 'storage' });
     }
   }
