@@ -138,8 +138,17 @@ const weightsBinding = (type, count, uniform) => (uniform
  */
 function reading(kind, shape) {
   const inFrame = (n) => `all(gg${n} >= vec2<i32>(0)) && all(gg${n} < p.frame)`;
+  // The same tests and addresses for a sample named by where it lies: `l` in the tile's window,
+  // `c` in the tile, `g` in the frame (the float forms read each sample once for all its uses).
+  const placed = kind === 'stem'
+    ? { valid: 'all(g >= vec2<i32>(0)) && all(g < p.frame)', index: `(g.y * p.frame.x + g.x) * ${shape.inputWords}` }
+    : {
+      valid: 'all(g >= vec2<i32>(0)) && all(g < p.frame) && all(c >= vec2<i32>(-p.reachBelow)) && all(c < p.tile + p.reachBelow)',
+      index: `(base + l.y * p.window.x + l.x) * ${shape.trunkWords}`,
+    };
   if (kind === 'stem') {
     return {
+      placed,
       words: shape.inputWords,
       kinds: ['u', 's'],
       sums: (word) => (word < shape.unsignedWords ? 'u' : 's'),
@@ -150,6 +159,7 @@ function reading(kind, shape) {
     };
   }
   return {
+    placed,
     words: shape.trunkWords,
     kinds: ['s'],
     sums: () => 's',
@@ -207,6 +217,17 @@ fn bounded(magnitude: i32) -> i32 { return i32((tanhTable[magnitude >> 2u] >> (u
   const words = range(read.words).map((word) => `{ let w = (t * ${read.words} + ${word}) * ${outputWords};
       ${pixels.map((n) => `let x${n} = ${products.input(`select(${read.pad(word)}, src[b${n} + ${word}], ok${n})`)};`).join(' ')}
       ${outputs.map((k) => `{ let m = wts[w + ${k}];${products.columns} ${pixels.map((n) => `${read.sums(word)}${n}_${k} += ${products.product(`x${n}`)};`).join(' ')} }`).join('\n      ')} }`);
+  // The float forms go row by row: a row's samples (the span's pixels and one either side) are
+  // read and converted once, then each weight is read once and used for every pixel it serves.
+  const floating = floatProducts || halfProducts;
+  const columns = range(span + 2);
+  const rows = `for (var dy = -1; dy <= 1; dy++) {
+    ${columns.map((j) => `var ok${j}: bool; var b${j}: i32; { let l = first + vec2<i32>(${j - 1}, dy); let c = l - p.halo; let g = corner + c;
+      ok${j} = ${read.placed.valid}; b${j} = select(0, ${read.placed.index}, ok${j}); }`).join('\n    ')}
+    ${range(read.words).map((word) => `{ ${columns.map((j) => `let v${j} = ${products.input(`select(${read.pad(word)}, src[b${j} + ${word}], ok${j})`)};`).join(' ')}
+      ${range(3).map((dx) => `{ let w = (((dy + 1) * 3 + ${dx}) * ${read.words} + ${word}) * ${outputWords};
+        ${outputs.map((k) => `{ let m = wts[w + ${k}]; ${pixels.map((n) => `${read.sums(word)}${n}_${k} += m * v${n + dx};`).join(' ')} }`).join('\n        ')} }`).join('\n      ')} }`).join('\n    ')}
+  }`;
   return `${halfProducts ? 'enable f16;' : ''}
 @group(0) @binding(0) var<storage, read> src: array<u32>;
 @group(0) @binding(1) var<storage, read_write> dst: array<u32>;
@@ -231,11 +252,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!(${pixels.map((n) => `live${n}`).join(' || ')})) { return; }
   let base = slot * p.window.x * p.window.y;
   ${pixels.map((n) => outputs.map((k) => read.kinds.map((sum) => `var ${sum}${n}_${k} = ${products.sum}(0);`).join(' ')).join(' ')).join('\n  ')}
-  for (var t = 0; t < ${TAPS}; t++) {
+  ${floating ? rows : `for (var t = 0; t < ${TAPS}; t++) {
     let d = vec2<i32>(t % 3 - 1, t / 3 - 1);
     ${pixels.map((n) => `let gg${n} = g${n} + d; let ok${n} = ${read.valid(n)}; let b${n} = select(0, ${read.index(n)}, ok${n});`).join('\n    ')}
     ${words.join('\n    ')}
-  }
+  }`}
   ${pixels.map((n) => `if (live${n}) { finish(l${n}, g${n}, base, ${outputs.map((k) => read.accumulator(products.whole, n, k)).join(', ')}); }`).join('\n  ')}
 }`;
 }
