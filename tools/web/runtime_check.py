@@ -7,11 +7,20 @@ Real frames of a bundled clip are upscaled by the page's own GPU upscaler
 (`web/js/gpu-upscaler.js`) and, from the same planes and motion field, by
 `cvnn_runtime::fixed::IntegerRuntime` compiled to WebAssembly. After every frame
 the network's input, its outputs, the conventional upscale and the output
-picture are read back from the GPU and compared word for word. The run covers
-what a stream meets: history carried from frame to frame, coding told and not
-told, a restart, a lost GPU device, and (over enough frames) every grouping
-of tiles the page's tuner tries. Prints a JSON report; exits non-zero on any
-difference. Needs a built module (tools/web/build.sh).
+picture are read back from the GPU and compared. The run covers what a stream
+meets: history carried from frame to frame, coding told and not told, a
+restart, a lost GPU device, and (over enough frames) every grouping of tiles
+the page's tuner tries.
+
+It is run once with the shaders in the exact integer form, which must give
+the reference's words, and once (where the GPU has 16-bit float) in the
+approximate form, whose differences the history carries forward: those are
+measured, and held to the bounds in `tolerance.py`; `--frames` sets how long
+a stream they are followed over. Prints a JSON line per run with, for each
+thing read back, the differing words, the largest difference in 8-bit steps,
+the share of samples that differ and PSNR against the reference (null:
+identical); exits non-zero if anything is outside its bound. Needs a built
+module (tools/web/build.sh).
 """
 
 from __future__ import annotations
@@ -23,6 +32,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 from smoke import CHROME_FLAGS, serve
+from tolerance import output_failures
 
 SCRIPT = Path(__file__).with_suffix(".js")
 PAGE_TIMEOUT_MS = 1_200_000
@@ -32,7 +42,7 @@ QUANTISER = 32.0  # the quantiser the model is told on the frames it is told one
 
 
 def main() -> int:
-    """Print the report; exit non-zero if anything differs from the reference."""
+    """Print the report; exit non-zero if a run is outside what its form allows."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", help="an 8-bit model's directory under web/models")
     parser.add_argument("--size", default="320x180", help="size of the upscaler's input")
@@ -48,6 +58,7 @@ def main() -> int:
         "directory": args.directory, "clip": args.clip, "frames": args.frames, "width": width,
         "height": height, "tiles": [int(tile) for tile in args.tiles.split(",")],
         "restartAt": args.restart_at, "loseDeviceAt": args.lose_device_at, "quantiser": QUANTISER,
+        "differences": SCRIPT.with_name("differences.js").read_text(),
     }  # fmt: skip
     server = serve()
     with sync_playwright() as playwright:
@@ -59,10 +70,19 @@ def main() -> int:
         report = page.evaluate(SCRIPT.read_text(), request)
         browser.close()
     server.shutdown()
-    print(json.dumps(report, indent=1))
-    differing = sum(sum(variant["differingWords"].values()) for variant in report["variants"])
+    variants = report.pop("variants")
+    print(json.dumps(report))
     recovered = all(used == 2 for used in report["devicesUsed"])  # each lost one and went on
-    return 0 if differing == 0 and recovered and report["largestVectorInSteps"] > 0 else 1
+    failed = not recovered or report["largestVectorInSteps"] <= 0
+    for variant in variants:
+        outside = {
+            name: output_failures(variant["form"], differences)
+            for name, differences in variant["differences"].items()
+        }
+        variant["outside"] = {name: planes for name, planes in outside.items() if planes}
+        print(json.dumps(variant))
+        failed = failed or bool(variant["outside"])
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

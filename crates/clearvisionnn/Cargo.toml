@@ -1,0 +1,21 @@
+[package]
+name = "clearvisionnn"
+description = "Fast causal 2x video super-resolution: the pre-process, the runtime and the 8-bit network of clearvisionNN"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/clearvisionnn"
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+cvnn-common.workspace = true
+cvnn-preproc.workspace = true
+cvnn-runtime.workspace = true
+
+[lints]
+workspace = true

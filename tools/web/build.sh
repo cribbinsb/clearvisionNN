@@ -13,6 +13,6 @@ if [[ "$("$bindgen" --version)" != 'wasm-bindgen 0.2.105' ]]; then
 fi
 # SIMD128 is in every browser that has WebGPU or WebNN.
 RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128" \
-  cargo build --profile web -p cvnn-web --target wasm32-unknown-unknown
+  cargo build --profile web -p clearvisionnn-web --target wasm32-unknown-unknown
 "$bindgen" target/wasm32-unknown-unknown/web/cvnn_web.wasm --target web --out-dir web/pkg --out-name cvnn_web
 ls -la web/pkg

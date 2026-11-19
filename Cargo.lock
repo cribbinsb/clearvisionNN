@@ -21,44 +21,53 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
-name = "cvnn-common"
+name = "clearvisionnn"
+version = "0.1.0"
+dependencies = [
+ "clearvisionnn-common",
+ "clearvisionnn-preproc",
+ "clearvisionnn-runtime",
+]
+
+[[package]]
+name = "clearvisionnn-common"
 version = "0.1.0"
 
 [[package]]
-name = "cvnn-preproc"
+name = "clearvisionnn-preproc"
 version = "0.1.0"
 dependencies = [
- "cvnn-common",
+ "clearvisionnn-common",
  "nanocodec-analysis",
  "nanocodec-common",
  "nanocodec-dsp",
 ]
 
 [[package]]
-name = "cvnn-py"
+name = "clearvisionnn-py"
 version = "0.1.0"
 dependencies = [
- "cvnn-common",
- "cvnn-preproc",
- "cvnn-runtime",
+ "clearvisionnn-common",
+ "clearvisionnn-preproc",
+ "clearvisionnn-runtime",
  "numpy",
  "pyo3",
 ]
 
 [[package]]
-name = "cvnn-runtime"
+name = "clearvisionnn-runtime"
 version = "0.1.0"
 dependencies = [
- "cvnn-common",
- "cvnn-preproc",
+ "clearvisionnn-common",
+ "clearvisionnn-preproc",
 ]
 
 [[package]]
-name = "cvnn-web"
+name = "clearvisionnn-web"
 version = "0.1.0"
 dependencies = [
- "cvnn-preproc",
- "cvnn-runtime",
+ "clearvisionnn-preproc",
+ "clearvisionnn-runtime",
  "js-sys",
  "wasm-bindgen",
 ]

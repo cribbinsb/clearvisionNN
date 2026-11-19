@@ -1,10 +1,19 @@
 [package]
-name = "cvnn-runtime"
-description = "clearvisionnn runtime: per-stream state and everything around the network (upscale, warp, blend)"
+name = "clearvisionnn-runtime"
+description = "Runtime: per-stream state and everything around the network (upscale, warp, blend), and the 8-bit network itself (part of clearvisionNN)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/clearvisionnn-runtime"
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "cvnn_runtime"
 
 [dependencies]
 cvnn-common.workspace = true

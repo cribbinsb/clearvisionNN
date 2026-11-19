@@ -1,10 +1,19 @@
 [package]
-name = "cvnn-common"
-description = "clearvisionnn shared types: block grids, per-frame features, errors"
+name = "clearvisionnn-common"
+description = "Shared types: block grids, per-frame features, errors (part of clearvisionNN)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/clearvisionnn-common"
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "cvnn_common"
 
 [lints]
 workspace = true

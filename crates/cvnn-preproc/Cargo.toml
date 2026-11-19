@@ -1,10 +1,19 @@
 [package]
-name = "cvnn-preproc"
-description = "clearvisionnn pre-process: motion field and side planes from nanocodec's source analysis"
+name = "clearvisionnn-preproc"
+description = "Pre-process: motion field and side planes from nanocodec's source analysis (part of clearvisionNN)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/clearvisionnn-preproc"
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "cvnn_preproc"
 
 [dependencies]
 cvnn-common.workspace = true

@@ -112,11 +112,18 @@ is found at `p + vector` in the previous frame, in samples of the analysed
   `cvnn_runtime::integer` is its reference implementation (and the session's
   codec between float tensors and packed 8-bit planes), which the tests check
   against an independent NumPy calculation and the page's WGSL shaders are
-  checked against bit for bit (`tools/web/int8_check.py`).
+  checked against (`tools/web/int8_check.py`). The shaders come in several
+  forms, because which is fast differs between GPUs by more than ten times
+  (section 8 of docs/INTEGER.md): two compute the reference's arithmetic
+  exactly and are held to it bit for bit; a 16-bit float form, which only
+  approximates it, is what an Apple GPU runs fastest by far and is held to a
+  measured tolerance. The page picks the form from the GPU's maker, never by
+  trying forms out (`js/int8-plan.js`).
 - For an integer model the page does not use the float session at all: the
   whole frame is integers on the GPU (`cvnn_runtime::fixed` is the reference,
   section 7 of docs/INTEGER.md the definition, `tools/web/runtime_check.py`
-  the bit-for-bit check). Planes and the block motion field go up; the
+  the check: bit for bit in an exact form, within the tolerance in the
+  approximate one). Planes and the block motion field go up; the
   conventional upscale, the warp of the state and of the previous output, the
   confidence plane, the network, the residual add and colour conversion are
   shader passes; the state and the previous output stay on the GPU, and the
@@ -157,8 +164,12 @@ is found at `p + vector` in the previous frame, in samples of the analysed
 | `js/runtime-shaders.js` | Everything around the integer network in WGSL: upscale, flow, warp, confidence, input assembly, finish, colour |
 | `js/int8-backend.js` | The integer network alone on WebGPU, for the WebAssembly session to work around |
 | `js/int8-model.js` | An integer model file as the shaders need it |
-| `js/int8-shaders.js` | The integer network in WGSL: one shader per kind of layer, for every tiling and grouping |
+| `js/int8-forms.js` | The forms of the network's shaders: how a layer's products are formed (packed integer, 32-bit float, 16-bit float), and the weights as each binds them |
+| `js/int8-shaders.js` | The integer network in WGSL: one generator, one shader per kind of layer, for every form, tiling and grouping |
+| `js/int8-plan.js` | Which form and shape of the shaders a GPU gets, from its maker and features |
 | `js/int8-network.js` | Buffers, pipelines and the dispatches of one frame |
+| `js/tuning.js` | Diagnostic switches from the page's address that override the plan |
+| `js/gpu-timer.js` | The GPU's own time for a pass, or for each step of a frame, from timestamp queries |
 | `js/int8-schedule.js` | Choosing how many tiles go through the network together, by timing on the device |
 | `js/webgpu-io.js` | WebGPU tensor traffic: input kept in a GPU buffer, only the changing channels uploaded, outputs read back through reused staging buffers; refuses a half-precision model where the GPU lacks `shader-f16` |
 | `js/source.js` | Sources of the original, as ImageBitmaps with their capture times: sample clips, test pattern, camera, video file |

@@ -1,10 +1,12 @@
 [package]
-name = "cvnn-py"
-description = "clearvisionnn Python bindings to the pre-process"
+name = "clearvisionnn-py"
+description = "Python bindings to the pre-process and the runtime (part of clearvisionNN)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+# A Python extension module, built with maturin: not a crate for other Rust code.
+publish = false
 
 [lib]
 name = "clearvisionnn_native"

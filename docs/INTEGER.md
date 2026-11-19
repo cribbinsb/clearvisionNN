@@ -7,10 +7,12 @@ crossing back to the processor.
 A flat luma model (stem, a stack of blocks, a long skip, a head) run entirely
 in 8-bit planes and 32-bit integer accumulators. This file is the
 specification. `cvnn_runtime::integer` (the network) and `cvnn_runtime::fixed`
-(the runtime) are its reference implementation; the page's WGSL shaders
-(`web/js/int8-shaders.js`, `web/js/runtime-shaders.js`) and the tests' NumPy
-version of the network (`python/tests/integer_reference.py`) must agree with
-it bit for bit.
+(the runtime) are its reference implementation. The tests' NumPy version of
+the network (`python/tests/integer_reference.py`) and the page's WGSL shaders
+(`web/js/int8-shaders.js`, `web/js/runtime-shaders.js`) must agree with it bit
+for bit, with one exception: on a GPU, speed comes first, and section 8 allows
+the network's shaders a 16-bit float form that only approximates the sums of
+section 2, within a measured and checked tolerance.
 
 It realises what the recipe's quantisation-aware fine-tune simulates
 (`recipe/quantise.py`), so trained weights transfer: section 6 says where the
@@ -185,3 +187,116 @@ rounding to 1/32 level. The rest differs by what fixed point drops: vectors
 rounded to 1/32 sample, warp weights to 1/64, the previous output rounded to
 1/32 level where it is produced instead of kept in float, the state warped
 after its rounding to 8 bits instead of before.
+
+## 8. On a GPU: the forms of the network's shaders
+
+On a GPU speed comes first. The page's shaders compute sections 1 to 4 in
+whichever of three forms the GPU runs fastest (`web/js/int8-forms.js`). The
+forms differ only in how a layer's sum of products (section 2) is formed;
+planes, storage, requantisation, the skips, the head and the tiling are the
+integer arithmetic above in all of them.
+
+| Form | The sum of products | Against sections 1 to 4 |
+|---|---|---|
+| `integer` | the packed 8-bit dot product (`dot4I8Packed`), 32-bit accumulators | exact |
+| `float` | 32-bit float products of the bytes as stored, summed in 32-bit float | exact: a sum of products of two signed bytes cannot pass 2^24 in a layer of up to 113 input channels, and the generator refuses a wider one |
+| `half` | 16-bit float throughout (needs the `shader-f16` feature) | approximate |
+
+**The half form.** A weight `w` is bound as `w/128`, a signed sample `s` is
+read as `s/128` and an unsigned one as its value over 256, `u/256` (not as
+the stored byte: a zero activation then adds exactly nothing, where the
+stored -128 would add a large term for the bias to cancel, and the rounding
+would be of that). Each conversion is exact. The products and their sum are
+16-bit float: eleven binary digits, rounded to nearest at every step, in the
+order the shader happens to add. The sum is then brought back to accumulator
+steps, `round(sum · 2^15)` for unsigned inputs and `round(sum · 2^14)` for
+signed, and everything after it is the integer arithmetic of sections 2 and
+3, with the bias as the file has it (the forms that read stored bytes add
+each weight's share of the 128 to it).
+
+So the half form departs from the integer one in the low bits of each
+accumulator, and nowhere else. What that does, measured on an NVIDIA GPU
+(Chrome, Vulkan) with `tools/web/int8_check.py` and
+`tools/web/runtime_check.py`:
+
+- **One layer, given the exact layer's input:** never more than one step of
+  its 8-bit output, on 2% of samples in the stem and 0.1% to 0.8% in the
+  blocks and the head (medium model; the extra-large model the same within a
+  factor of two).
+- **Through the network, one frame:** a network of ReLU layers amplifies a
+  difference of one step, so the differences do not stay at one step. In the
+  medium model a quarter of the activations half-way up differ, by up to 15
+  steps; the output comes back together: the picture output is within 1.6
+  levels of the exact one, PSNR 64 dB, and the state within one step on 9%
+  of samples.
+- **Through the history, frame after frame:** the state and the previous
+  output feed the next frame, and the difference settles; it does not grow.
+  The output picture against the exact one, as RGBA bytes:
+
+  | Model, clip, input size, frames of unbroken history | PSNR, all frames | Worst frame | Bytes that differ | Largest |
+  |---|---|---|---|---|
+  | small, webcam, 160x88, 140 | 54.5 dB | 54.0 dB | 22% | 5 |
+  | medium, film, 320x180, 12 | 55.1 dB | 54.5 dB | 20% | 4 |
+  | medium, film, 160x88, 140 | 54.0 dB | 53.3 dB | 25% | 6 |
+  | extra-large, waterfall, 160x88, 40 | 52.4 dB | 50.9 dB | 31% | 13 |
+
+  Nearly every differing byte differs by one. The larger differences are
+  isolated samples, more of them the wider and deeper the model.
+
+That is not "at most one step" at the output, and no cheap change makes it
+so: computing the stem exactly gains 1.4 dB on a single frame, summing each
+row of the 3x3 in 16-bit and the rows in 32-bit float nothing measurable
+(both tried on the medium model, neither kept). A picture 50 dB and more
+from another is not told from it by eye; where even that is not wanted, the
+float form is exact.
+
+**The check.** Both browser checks run every form. An exact form must give
+the reference's words. The half form must stay inside the bounds of
+`tools/web/tolerance.py`: a layer alone within one step on at most 5% of
+samples; through the network and the history, the worst frame's PSNR and the
+largest difference of each plane, set about 3 dB and as many steps again
+outside the worst measured above. The measurements are of one GPU's 16-bit
+arithmetic; another may contract a multiply and an add into one rounding, or
+add in a different order, which moves single results by a last digit: that
+is what the room is for, and the checks are how to find out on it.
+
+**Which form a GPU gets** (`web/js/int8-plan.js`). The forms differ by more
+than ten times, in opposite directions, and one frame of the wrong form
+takes seconds on some GPUs, so the page chooses from what the browser says
+of the GPU and never by trying forms out.
+
+| GPU maker, as the browser names it | Form | Why |
+|---|---|---|
+| `nvidia` | integer | Measured (RTX 5090, medium model, 640x360 input, GPU time of the network alone): integer 0.9 ms a frame, 32-bit float 2.5 to 6 ms, 16-bit float 2 to 3.5 ms |
+| `apple`, with `shader-f16` | half | Measured (M5, the page, same model and size): integer about 800 ms a frame, 32-bit float a pixel to an invocation about 660 ms, 16-bit float four pixels to an invocation 50 ms. In a test of one layer chain there, 32-bit float four pixels to an invocation took about 150 ms and 16-bit float 68 to 117 ms |
+| `amd`, `intel` | integer | A guess, nothing measured: desktop GPUs like NVIDIA's, and the form the page gave every GPU before the forms existed. The first to measure: `?form=integer` against `?form=float` in the page's address |
+| `arm`, `qualcomm`, `img-tec`, `samsung`, with `shader-f16` | half | A guess, nothing measured: phone GPUs of the tile-based kind Apple's is, built round 16-bit float and with no packed dot product in hardware |
+| any other, or no `shader-f16` | float | The cautious choice, nothing measured: exact, needs nothing optional, and its worst case is the mildest. Where integer is the right form it costs about four times (the NVIDIA figures); integer where half is the right form costs sixteen times (the Apple ones) |
+
+**The shape of the work** (`web/js/int8-shaders.js`) is the same in every
+form: an invocation computes several pixels of a row and goes row by row of
+the 3x3, reading a row's samples once and each weight once for all the
+pixels and taps it serves; the rows are a loop; a layer's output words can
+be shared between invocations; and no sample is tested for a tile's edge,
+because every layer writes zeros round what it computes (a border one pixel
+wide round each tile's window) for the next to read. None of it changes a
+result. How many pixels and how many invocations is chosen per form:
+
+| Form | Pixels to an invocation | Invocations sharing a layer's outputs | A sample's words | Evidence |
+|---|---|---|---|---|
+| integer | 1 | 1 | written out | Measured on NVIDIA: two pixels cost 10% to 25% more, four several times more; sharing the outputs between two costs 60% to 100% more; looping over the words makes no difference beyond the noise |
+| half | 4 | 1 | written out | Exactly the shape that measured 50 ms on the M5, which also tests every sample for the tile's edge. Sharing between two, and dropping the edge tests, each made a test of one layer chain there quicker (43 ms at best against 68 and more); in the page on an M5 they are not yet measured, so they are switches (`?split=2`, `?edges=bordered`), not the default |
+| float | 4 | 1 | looped | Four pixels as for half, a guess for GPUs nothing is known of; looped words measured quicker on NVIDIA (about 5 ms against 7) and compile many times faster |
+
+The zero border in place of edge tests is used by the integer and float
+forms (the half form keeps the tests until the border is measured on an
+Apple GPU): on NVIDIA the
+integer form with the tests measured 6% to 12% slower in the median. Against
+the shaders as they were before (one pixel, a loop over the nine taps, every
+sample tested), the integer form on NVIDIA measured the same least time
+within the noise (0.83 to 1.06 ms before, 0.87 to 1.02 ms now, over five
+interleaved runs on a shared GPU) and an 8% to 18% lower median.
+
+Every choice can be overridden from the page's address
+(`web/js/tuning.js`), to compare on a device one reload at a time, and
+`tools/web/shader_bench.py` times any of them on this machine.

@@ -13,13 +13,17 @@ const BLOCK = 8; // side of a motion block, in input samples
 const WORD = 4; // bytes of a word
 const FRAME_BYTES = 32; // the Frame uniform: size, valid, padding, coding
 const PICTURES = ['conventional', 'output'];
+// The steps of a frame in the order they run; `flow` and `errors` only where there is history to warp.
+const ORDER = ['wideChroma', 'conventional', 'flow', 'errors', 'assemble', 'network', 'finish'];
 
 /**
  * `model` (int8-model.js), whose contract is `contract`, on `device` for
- * `width` x `height` input. `options` are int8-network.js's, for checks.
- * `canvases` are two canvases of twice that size, drawn to by `present`.
+ * `width` x `height` input. `options` are int8-network.js's, and `stepTimes`:
+ * each step is then a pass of its own, timed apart, to find which one a GPU
+ * is slow at. `canvases` are two canvases of twice that size, drawn to by
+ * `present`.
  */
-export function createGpuRuntime(device, model, contract, width, height, canvases, options = {}) {
+export function createGpuRuntime(device, model, contract, width, height, canvases, { stepTimes = false, ...options } = {}) {
   const network = createInt8Network(device, model, width, height, options);
   const recurrent = contract.temporal === 'recurrent';
   const confident = recurrent && contract.confidence_plane;
@@ -86,9 +90,11 @@ export function createGpuRuntime(device, model, contract, width, height, canvase
     ]),
     finish: step(finishShader(model.outputWords), input, [b.base, b.colour, b.state, b.previous, b.output]),
   };
+  let tilesPerGroup = network.tiles;
+  steps.network = (pass) => network.encode(pass, tilesPerGroup);
   const presenters = createPresenters(device, canvases, PICTURES.map((name) => buffers[name]), fine[0]);
   const settings = new Int32Array(FRAME_BYTES / WORD);
-  const timer = createPassTimer(device);
+  const timer = createPassTimer(device, stepTimes ? ORDER.length : 1);
   let parity = 0;
 
   return {
@@ -97,10 +103,13 @@ export function createGpuRuntime(device, model, contract, width, height, canvase
      * Submit one frame: `planes` is the 4:2:0 frame (Y, U, V bytes), `vectors`
      * its block motion field (Int32Array, dx and dy per block), `valid`
      * whether the history on the GPU may be used, `coding` the three coding
-     * levels. Resolves when the GPU has finished it, to the milliseconds the
-     * GPU spent computing it, or to null where that cannot be known.
+     * levels, `group` the tiles per dispatch. Resolves when the GPU has
+     * finished it, to `{ compute, steps }`: the milliseconds the GPU spent
+     * computing it (null where that cannot be known) and, where steps are
+     * timed apart, those of each by name (else null).
      */
-    submit(planes, vectors, valid, coding, tilesPerGroup) {
+    submit(planes, vectors, valid, coding, group) {
+      tilesPerGroup = group;
       parity = 1 - parity;
       settings.set([width, height, recurrent && valid ? 1 : 0, 0, ...coding, 0]);
       device.queue.writeBuffer(frame, 0, settings);
@@ -108,21 +117,26 @@ export function createGpuRuntime(device, model, contract, width, height, canvase
       device.queue.writeBuffer(buffers.chroma, 0, planes, pixels, pixels / 2);
       device.queue.writeBuffer(buffers.vectors, 0, vectors);
       const encoder = device.createCommandEncoder();
-      const pass = encoder.beginComputePass(timer ? { timestampWrites: timer.writes } : {});
-      steps.wideChroma(pass, parity);
-      steps.conventional(pass, parity);
-      if (recurrent && valid) {
-        steps.flow(pass, parity);
-        if (confident) steps.errors(pass, parity);
-      }
-      steps.assemble(pass, parity);
-      network.encode(pass, tilesPerGroup);
-      steps.finish(pass, parity);
-      pass.end();
+      const warping = recurrent && valid;
+      const due = ORDER.filter((name) => (name === 'flow' ? warping : name === 'errors' ? warping && confident : true));
+      // One pass for the frame, or one for each step where they are timed apart.
+      const passes = stepTimes && timer ? due.map((name) => [name]) : [due];
+      passes.forEach((names) => {
+        const pass = encoder.beginComputePass(timer ? { timestampWrites: timer.writes(stepTimes ? ORDER.indexOf(names[0]) : 0) } : {});
+        names.forEach((name) => steps[name](pass, parity));
+        pass.end();
+      });
       timer?.resolve(encoder);
       presenters.forEach((present) => present(encoder));
       device.queue.submit([encoder.finish()]);
-      return timer ? timer.read() : device.queue.onSubmittedWorkDone().then(() => null);
+      if (!timer) return device.queue.onSubmittedWorkDone().then(() => ({ compute: null, steps: null }));
+      return timer.read().then((times) => {
+        if (!times) return { compute: null, steps: null };
+        if (!stepTimes) return { compute: times[0], steps: null };
+        const known = due.map((name) => [name, times[ORDER.indexOf(name)]]).filter(([, ms]) => ms !== null);
+        // A step too short for the timestamps to tell apart counts as nothing.
+        return { compute: known.reduce((sum, [, ms]) => sum + ms, 0), steps: Object.fromEntries(known) };
+      });
     },
     /** Read back what the last frame produced, as Uint32Arrays: for checks only. */
     async read(names) {

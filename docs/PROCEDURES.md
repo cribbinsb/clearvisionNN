@@ -46,10 +46,11 @@ tools/web/build-nanocodec.sh                    # builds web/nanocodec from ../n
 python3 tools/web/serve.py                      # open http://localhost:8000; an edit is always what runs
 python3 tools/web/smoke.py                      # unattended run in headless Chrome; prints timings
 python3 tools/web/smoke.py --model 2 --backend webgpu    # a float model (index in manifest.json) on a named backend
-python3 tools/web/int8_check.py recurrent-m-8bit         # the 8-bit network's shaders against the Rust reference, bit for bit
-python3 tools/web/runtime_check.py recurrent-m-8bit      # the whole all-GPU frame against the integer runtime, bit for bit
+python3 tools/web/int8_check.py recurrent-m-8bit         # the 8-bit network's shaders against the Rust reference: exact forms bit for bit, the 16-bit float form within its tolerance
+python3 tools/web/runtime_check.py recurrent-m-8bit      # the whole all-GPU frame against the integer runtime, likewise
+python3 tools/web/shader_bench.py <model> '[{}, {"form": "float", "span": 4}]'   # the GPU's own time for ways of writing the network's shaders (a diagnostic)
 python3 tools/web/smoke.py --backend webgpu --size 1280x720 --view magnify --noise 3 --codec avc --rate bpp:0.08 --screenshot work/demo-screenshots/x.png
-cargo run --release -p cvnn-runtime --example timing [width height]   # time each runtime step natively
+cargo run --release -p clearvisionnn-runtime --example timing [width height]   # time each runtime step natively
 ```
 
 - The page's model list (`web/models/manifest.json`) leads with the 8-bit
@@ -67,6 +68,21 @@ cargo run --release -p cvnn-runtime --example timing [width height]   # time eac
   (`tools/web/schedule.test.mjs`). `runtime_check.py` also covers a restart, a
   lost device, and, over its default 30 frames, every grouping of tiles the
   tuner tries: a grouping that changed the output would show as a difference.
+  Both check every form of the shaders: the exact ones must give the
+  reference's words; the 16-bit float form, which the checks run wherever the
+  GPU has `shader-f16`, must stay within `tools/web/tolerance.py` (section 8
+  of docs/INTEGER.md says where the bounds come from). The reference runs in
+  WebAssembly and is slow for the larger models: the medium one takes about
+  ten minutes for 30 frames at 320x180, so follow a long stream at a smaller
+  size (`--size 160x88 --frames 160`).
+- The page chooses the form of the shaders from the GPU's maker
+  (`web/js/int8-plan.js`) and says which it runs in its diagnostics line.
+  Switches in the address override it, to compare forms on a device one
+  reload at a time: `?form=integer|float|half`, `?span=<n>`, `?split=<n>`,
+  `?words=looped|written`, `?edges=tested|bordered`, `?weights=storage`, `?packed=0`, `?tile=<n>`, and
+  `?steps=1`, which times each step of a frame on the GPU apart
+  (`web/js/tuning.js` says what each does). `tools/web/shader_bench.py` times
+  any of them on this machine's GPU without the page.
 - "WebGPU 8-bit" runs the whole frame on the GPU; "WebGPU 8-bit network, the
   rest in WebAssembly" (`--backend webgpu-int8-network`) keeps the float
   session around the integer network, for comparison.

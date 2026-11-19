@@ -6,11 +6,11 @@ set -euo pipefail
 echo "== rust: format, lint, test"
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --exclude cvnn-py --quiet
+cargo test --workspace --exclude clearvisionnn-py --quiet
 # The browser crate must also lint clean for its real target, with the target
 # features the build uses (tools/web/build.sh): nanocodec's kernels need them.
 RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128" \
-  cargo clippy -p cvnn-web --target wasm32-unknown-unknown -- -D warnings
+  cargo clippy -p clearvisionnn-web --target wasm32-unknown-unknown -- -D warnings
 
 echo "== python: the extension the tests import must be the one just checked"
 (cd crates/cvnn-py && env -u CONDA_PREFIX maturin develop --release --quiet)

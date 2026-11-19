@@ -7,6 +7,7 @@ frames and writes frames per second and per-step timings into `#report`.
 
     python3 tools/web/smoke.py [--backend wasm] [--size 640x360] [--model 0] [--frames 20]
         [--view magnify] [--noise 3] [--codec avc] [--rate bpp:0.08] [--screenshot view.png]
+        [--switches 'form=half&steps=1']
 
 Needs Playwright for Python and a built module (tools/web/build.sh).
 """
@@ -76,6 +77,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         f"&noise={args.noise}&codec={args.codec}&rate={args.rate}&keyint={args.keyint}&tell={args.tell}"
         f"&blur={args.blur}&denoise={args.denoise}&kernel={args.kernel}"
     )
+    if args.switches:
+        query += f"&{args.switches}"
     url = f"http://127.0.0.1:{server.server_address[1]}/index.html?{query}"
     messages: list[str] = []
     with sync_playwright() as playwright:
@@ -133,6 +136,11 @@ def main() -> int:
     parser.add_argument("--rate", default="bpp:0.08", help="bpp:<bits per pixel> or qp:<quantiser>")
     parser.add_argument("--keyint", type=int, default=0, help="key-frame interval; 0: first only")
     parser.add_argument("--screenshot", help="write a picture of the view here when the run ends")
+    parser.add_argument(
+        "--switches",
+        default="",
+        help="diagnostic switches for the page's address (web/js/tuning.js): form=half&steps=1",
+    )
     parser.add_argument("--channel", default="chrome", help="Playwright browser channel")
     args = parser.parse_args()
     report = run(args)

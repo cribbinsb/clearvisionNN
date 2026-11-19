@@ -1,6 +1,10 @@
 // An integer model file (docs/INTEGER.md) as the shaders need it: the layers'
 // packed weights as they are, and their constants gathered per layer into the
-// vec4<i32> arrays the shaders read. `cvnn_runtime::integer` has already
+// vec4<i32> arrays the shaders read. The constants come twice, because the
+// forms of the shaders (int8-forms.js) read an unsigned input in two ways:
+// `stored`, as the signed byte in the buffer, 128 below its value, for which
+// the bias carries each weight's share of that 128; and `plain`, as its value,
+// for which the bias is the file's own. `cvnn_runtime::integer` has already
 // validated the file by the time this runs.
 
 const HEADER_WORDS = 16;
@@ -64,8 +68,12 @@ export function parseIntegerModel(words) {
   const tanh = take(tanhLength / WORD);
   // The stem brings unsigned planes (1/255) and signed ones (1/127) onto one scale.
   const stemGain = (word) => (word < unsignedWords ? SIGNED_LEVELS : 0);
-  const constants = (layer, bias, extra) => vectors([bias, layer.multiplier, layer.shift, layer.identity, extra]);
   const unsigned = () => 1;
+  /** A layer of `wordsIn` input words, each multiplied by `gain(word)`, with its constants for both readings. */
+  const layer = (conv, wordsIn, outputs, gain, extra) => {
+    const constants = (bias) => vectors([bias, conv.multiplier, conv.shift, conv.identity, extra]);
+    return { weights: conv.weights, constants: { stored: constants(storedBias(conv, wordsIn, outputs, gain)), plain: constants(conv.bias) } };
+  };
   return {
     inputWords, unsignedWords, trunkWords, halo, tile,
     slots: [...slots], // per input byte, the input channel it holds; -1 for padding
@@ -74,13 +82,10 @@ export function parseIntegerModel(words) {
     stemGains: [SIGNED_LEVELS, UNSIGNED_LEVELS], // for words of unsigned planes, of signed planes
     // One entry per layer, in order: the stem, the body, the head.
     layers: [
-      { weights: stem.weights, constants: constants(stem, storedBias(stem, inputWords, channels, stemGain), []) },
-      ...body.map((block, index) => ({
-        weights: block.weights,
-        // The last block also adds the long skip.
-        constants: constants(block, storedBias(block, trunkWords, channels, unsigned), index === blocks - 1 ? skip : []),
-      })),
-      { weights: head.weights, constants: constants(head, storedBias(head, trunkWords, outputs, unsigned), [tanhLength - 1]) },
+      layer(stem, inputWords, channels, stemGain, []),
+      // The last block also adds the long skip.
+      ...body.map((block, index) => layer(block, trunkWords, channels, unsigned, index === blocks - 1 ? skip : [])),
+      layer(head, trunkWords, outputs, unsigned, [tanhLength - 1]),
     ],
     tanh,
   };
