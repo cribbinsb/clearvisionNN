@@ -6,7 +6,6 @@
 
 import { backendsFor, usableBackends } from './backends.js';
 import { describeGpu } from './gpu-device.js';
-import { SLOW_GPU } from './gpu-upscaler.js';
 import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS, FIRST_CLIP, clipUrl } from './clips.js';
 import { createController } from './controller.js';
 import { setUpDegrade } from './degrade.js';
@@ -25,7 +24,6 @@ const controls = {
 };
 // The codec's time has a cell id of its own: `codec` is the codec control.
 const statCells = () => ({ ...byId(['fps', 'upscalerFps', 'prepare', 'network', 'compute', 'wait', 'finish', 'degrade', 'bitrate', 'coding']), codec: element('codec-time') });
-const FLOAT_GPU_BACKEND = 'webgpu'; // the backend a float model falls back to when the 8-bit shaders are too slow
 const diagnostics = element('diagnostics');
 const status = element('status');
 const credit = element('credit');
@@ -37,15 +35,13 @@ let gpu = null; // the GPU the browser offers, in words
 // Switches for finding out why a device is slow, from the address: `?weights=storage` binds the
 // 8-bit network's weights the slower, more widely proven way; `?packed=0` avoids the packed
 // dot-product built-ins; `?products=float` (or `integer`) fixes how the products are formed;
-// `?tile=<n>` sets the tile size; `?tooslow=<ms>` sets the GPU time above
-// which the 8-bit shaders are given up for a float model.
+// `?tile=<n>` sets the tile size.
 const address = new URLSearchParams(location.search);
 const tuning = {
   ...(address.get('weights') === 'storage' && { uniformWeights: false }),
   ...(address.get('packed') === '0' && { packedDot: false }),
   ...(address.has('products') && { floatProducts: address.get('products') === 'float' }),
   ...(address.has('tile') && { tile: Number(address.get('tile')) }),
-  ...(address.has('tooslow') && { tooSlowMs: Number(address.get('tooslow')) }),
 };
 let models = [];
 let backends = []; // those this browser can use
@@ -126,20 +122,6 @@ function start(frameLimit) {
   return controller.start(settings, frameLimit);
 }
 
-/**
- * The GPU cannot run the page's own shaders at a usable speed: choose a float model the
- * browser's WebGPU backend can run, and say so. Returns whether there was one to choose.
- */
-function fallBackToFloat(reason) {
-  const float = models.findIndex((model) => backendsFor(model, backends).some((backend) => backend.id === FLOAT_GPU_BACKEND));
-  if (float < 0 || float === controls.model.selectedIndex) return false;
-  controls.model.selectedIndex = float;
-  offerBackends();
-  controls.backend.value = FLOAT_GPU_BACKEND;
-  element('modelNote').textContent = `${reason} The page is running the float model on the browser's own WebGPU backend instead.`;
-  return true;
-}
-
 /** Show the controls that belong to the chosen view, and tell the view. */
 function applyView() {
   const mode = controls.view.find((radio) => radio.checked).value;
@@ -199,11 +181,8 @@ async function main() {
     await runUnattended(parameters, controls, start, outcome, element('report'));
     return;
   }
-  // A failed start already shows its error through onState; one kind has a remedy.
-  const restart = () => start().catch((error) => {
-    if (error.code === SLOW_GPU && fallBackToFloat(error.message)) return restart();
-    return undefined;
-  });
+  // A failed start already shows its error through onState.
+  const restart = () => start().catch(() => {});
   const restarting = ['size', 'model', 'backend', 'file', 'preset', 'blur', 'noise', 'denoise', 'kernel', 'codec', 'rate', 'keyint', 'tellModel'];
   for (const name of restarting) controls[name].addEventListener('change', restart);
   controls.pause.addEventListener('click', () => {
