@@ -14,10 +14,9 @@ const BLOCK = 8; // side of a motion block, in input samples
 const UNKNOWN_QUANTISER = -1; // what the WebAssembly side takes for "coding not known"
 const TRIAL_FRAMES = 3; // frames each way of writing the shaders is timed on, the first not counted
 const TRIAL_GIVE_UP = 3; // a way this many times slower than the best so far is dropped at once
-const FIRST_FRAME_GIVE_UP = 5; // and one whose very first frame is this many times too slow, after that frame
-// The network's GPU time above which the page's own shaders are not worth running: a float model
-// on the browser's WebGPU would be quicker. Some GPUs take seconds where others take a millisecond.
-const TOO_SLOW_MS = 100;
+// The network's GPU time above which the page's own shaders are not worth running: slower than
+// that, a float model on the browser's WebGPU does no worse. Some GPUs take seconds where others take a millisecond.
+const TOO_SLOW_MS = 400;
 /** What `error.code` is when the shaders work but are too slow to use (app.js then tries a float model). */
 export const SLOW_GPU = 'slow-gpu';
 
@@ -26,9 +25,10 @@ export const SLOW_GPU = 'slow-gpu';
  * diagnostics: in packed integers, quickest where the GPU has hardware for them, and in exact
  * float, far quicker where it has not (an Apple GPU).
  */
+// Float first: where integers are the slow form, they are then given up after one counted frame.
 const VARIANTS = [
-  { name: 'integer products', options: {} },
   { name: 'float products', options: { floatProducts: true } },
+  { name: 'integer products', options: {} },
 ];
 
 /** The model file's words, refused unless the reference implementation accepts the file. */
@@ -66,12 +66,12 @@ export async function createGpuUpscaler(model, width, height, { tooSlowMs = TOO_
     for (let frame = 0; frame < TRIAL_FRAMES; frame += 1) {
       const submitted = performance.now();
       const computing = await runtime.submit(blank, vectors, false, levels, group);
-      const took = computing ?? performance.now() - submitted;
-      // The first frame may also finish compiling the shaders, so it is not counted, unless it is
-      // so slow that the way is already out of the running: on some GPUs one takes seconds.
-      if (frame === 0 && took > FIRST_FRAME_GIVE_UP * Math.min(limit, tooSlowMs)) return took;
-      if (frame > 0) quickest = Math.min(quickest, took);
-      if (frame > 0 && quickest > TRIAL_GIVE_UP * limit) break;
+      // The first frame is never counted or judged: some GPUs only finish compiling the shaders
+      // when they first run, which can take longer than any frame after.
+      if (frame === 0) continue;
+      quickest = Math.min(quickest, computing ?? performance.now() - submitted);
+      // A way already far behind the best is not worth another frame: on some GPUs one takes a second.
+      if (quickest > TRIAL_GIVE_UP * limit) break;
     }
     return quickest;
   }
