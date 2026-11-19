@@ -136,8 +136,10 @@ function offerBackends() {
  */
 function offerModels() {
   fill(controls.model, models.map((model, index) => [index, describe(model)]));
-  const runnable = models.findIndex((model) => backendsFor(model, backends).length > 0);
-  controls.model.selectedIndex = Math.max(runnable, 0);
+  const runs = (model) => backendsFor(model, backends).length > 0;
+  const runnable = models.findIndex(runs);
+  const preferred = models.findIndex((model) => model.opensFirst && runs(model));
+  controls.model.selectedIndex = Math.max(preferred >= 0 ? preferred : runnable, 0);
   element('modelNote').textContent = runnable > 0
     ? 'This browser has no usable WebGPU, which the 8-bit models need: showing a float model instead.' : '';
   offerBackends();

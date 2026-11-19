@@ -66,8 +66,9 @@ async function openVideo(kind, url, release) {
 
 /**
  * A source of the given kind: 'pattern', 'clip' (options.url), 'camera' or 'file' (options.file).
- * `grab()` resolves to the current frame as `{ picture, time }`: an ImageBitmap
- * the caller owns and when it was captured (ms; in a clip, its time there).
+ * `grab()` resolves to the current frame as `{ picture, time }`: a picture the
+ * caller owns (an ImageBitmap or a VideoFrame: either can be drawn, sent to a
+ * worker and closed) and when it was captured (ms; in a clip, its time there).
  * `nextFrame()` resolves when a new one is due, `pause()` and `resume()`
  * hold and release the source's own clock, and `stop()` releases
  * everything the source holds.

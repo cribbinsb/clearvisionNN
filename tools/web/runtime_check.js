@@ -10,7 +10,7 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
   const { IntegerReference, MotionSearch } = await import('/pkg/cvnn_web.js');
   const { loadModels } = await import('/js/models.js');
   const { createGpuUpscaler } = await import('/js/gpu-upscaler.js');
-  const { createSender } = await import('/js/sender.js');
+  const { createCameraPool } = await import('/js/camera-pool.js');
   const { openSource } = await import('/js/source.js');
   const { clipUrl } = await import('/js/clips.js');
 
@@ -26,11 +26,8 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
   const model = (await loadModels()).find((candidate) => candidate.directory === directory);
   const words = new Int32Array(await (await fetch(model.url)).arrayBuffer());
   const source = await openSource('clip', 2 * width, 2 * height, { url: clipUrl(clip) });
-  const sender = await createSender(2 * width, 2 * height, { sigma: 0, blur: 0, denoise: 0, kernel: 'bicubic', codec: null });
+  const camera = createCameraPool(2 * width, 2 * height, { sigma: 0, blur: 0, denoise: 0, kernel: 'bicubic' });
   const pixels = width * height;
-  // The source now hands out bitmaps; the sender works on bytes (as frame-pipeline.js reads them).
-  const reader = new OffscreenCanvas(2 * width, 2 * height).getContext('2d', { willReadFrequently: true });
-  const pixelsOf = async (picture) => { reader.drawImage(picture, 0, 0); picture.close(); return reader.getImageData(0, 0, 2 * width, 2 * height).data; };
   const names = ['input', 'state', 'conventional', 'output'];
   const variants = [];
   for (const tile of tiles) {
@@ -44,7 +41,8 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
   const expected = [pixels * (words[3] + words[4]), pixels * (2 + words[8] / 4), 4 * pixels, 4 * pixels].map((length) => new Uint32Array(length));
   let moved = 0;
   for (let frame = 0; frame < frames; frame += 1) {
-    const sent = await sender.send(await pixelsOf((await source.grab()).picture));
+    const sent = await camera.capture((await source.grab()).picture);
+    sent.picture.close();
     const planes = new Uint8Array(sent.frame);
     const coding = frame % 2 ? { quantiser, key: frame % 8 === 1 } : null; // told on alternate frames
     for (const variant of variants) {
@@ -82,7 +80,7 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
   };
   for (const variant of variants) await variant.upscaler.release();
   source.stop();
-  sender.release();
+  camera.release();
   GPUAdapter.prototype.requestDevice = request;
   return report;
 }

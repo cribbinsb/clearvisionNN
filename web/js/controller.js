@@ -3,9 +3,12 @@
 // every path, including failures part-way through starting. A run can be
 // paused, stepped a frame at a time and resumed.
 
+import { CAMERAS } from './camera-pool.js';
+
 const WARM_UP_FRAMES = 5; // the first frames compile shaders and fill caches; they are not timed
-// Frames inside the pipeline at once: the sender prepares one while the GPU finishes the one before.
-const IN_FLIGHT = 2;
+// Frames inside the pipeline at once: one with each of the camera's workers while the channel and
+// the GPU finish the one before.
+const IN_FLIGHT = CAMERAS + 1;
 
 /**
  * A controller that runs sessions built by `open(settings)`, which resolves to

@@ -164,7 +164,8 @@ is found at `p + vector` in the previous frame, in samples of the analysed
 | `js/source.js` | Sources of the original, as ImageBitmaps with their capture times: sample clips, test pattern, camera, video file |
 | `js/clip-player.js`, `js/clip-frames.js`, `js/mp4.js` | A clip or file played frame by frame, every frame in order, more slowly when the page cannot keep up; the frame-exact decoder and MP4 reader are nanocodec's |
 | `js/degrade.js`, `js/degrade-presets.js` | The "degrade the input" controls as settings: a list of ready-made inputs, and each step by itself; which codecs the browser offers |
-| `js/sender.js` | The simulated sender and channel: the camera (blur, noise, denoise, reduction), optional codec; pairs decoded frames with their originals |
+| `js/camera-pool.js`, `js/camera-worker.js` | The simulated camera (blur, noise, denoise, reduction) as workers taking frames in turn, side by side |
+| `js/sender.js` | The simulated channel: optional codec; pairs decoded frames with their originals |
 | `js/codec.js`, `js/planar.js` | The WebCodecs encode-decode round trip; reading decoded frames as 4:2:0 |
 | `js/upscaler.js` | The upscaler: session, network, session |
 | `js/frame-pipeline.js` | One frame through sender and upscaler; two frames may be inside at once, the sender's work on one overlapping the GPU's on the one before |

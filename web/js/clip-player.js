@@ -23,11 +23,13 @@ export async function openClipPlayer(url, width, height, release) {
   return {
     async grab() {
       const frame = await clip.frame(played % clip.frameCount);
+      played += 1;
+      const time = (played - 1) * interval;
+      // A decoded frame is itself a picture that can be drawn, sent to a worker and closed:
+      // at the clip's own size it is handed on as it is, with no copy made on this thread.
+      if (frame.displayWidth === width && frame.displayHeight === height) return { picture: frame, time };
       try {
-        const scaled = frame.displayWidth !== width || frame.displayHeight !== height;
-        const picture = await createImageBitmap(frame, scaled ? { resizeWidth: width, resizeHeight: height } : {});
-        played += 1;
-        return { picture, time: (played - 1) * interval };
+        return { picture: await createImageBitmap(frame, { resizeWidth: width, resizeHeight: height }), time };
       } finally {
         frame.close();
       }

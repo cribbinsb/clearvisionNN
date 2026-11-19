@@ -9,7 +9,7 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
   const { parseIntegerModel } = await import('/js/int8-model.js');
   const { createInt8Network } = await import('/js/int8-network.js');
   const { groupCandidates } = await import('/js/int8-schedule.js');
-  const { createSender } = await import('/js/sender.js');
+  const { createCameraPool } = await import('/js/camera-pool.js');
   const { openSource } = await import('/js/source.js');
   const { clipUrl } = await import('/js/clips.js');
 
@@ -26,11 +26,8 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
     contract.state_channels, contract.side_planes, contract.luma_only, contract.coding_planes,
     contract.confidence_plane);
   const source = await openSource('clip', 2 * width, 2 * height, { url: clipUrl(clip) });
-  const sender = await createSender(2 * width, 2 * height, { sigma: 0, blur: 0, denoise: 0, kernel: 'bicubic', codec: null });
+  const camera = createCameraPool(2 * width, 2 * height, { sigma: 0, blur: 0, denoise: 0, kernel: 'bicubic' });
   const pixels = width * height;
-  // The source now hands out bitmaps; the sender works on bytes (as frame-pipeline.js reads them).
-  const reader = new OffscreenCanvas(2 * width, 2 * height).getContext('2d', { willReadFrequently: true });
-  const pixelsOf = async (picture) => { reader.drawImage(picture, 0, 0); picture.close(); return reader.getImageData(0, 0, 2 * width, 2 * height).data; };
   const packed = new Uint32Array(pixels * codec.input_words());
   const reference = new Uint32Array(pixels * codec.output_words());
   const picture = new Uint8ClampedArray(16 * pixels);
@@ -46,7 +43,8 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
   const results = variants.map(({ tile, group, packedDot }) => ({ tile, group, packedDot, differingWords: 0, times: [] }));
   let distinct = 0;
   for (let frame = 0; frame < frames; frame += 1) {
-    const sent = await sender.send(await pixelsOf((await source.grab()).picture));
+    const sent = await camera.capture((await source.grab()).picture);
+    sent.picture.close();
     upscaler.prepare_packed(sent.frame, codec, packed);
     for (const tile of tiles) {
       codec.infer(packed, width, height, tile, reference);
@@ -71,7 +69,7 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
     }
   }
   source.stop();
-  sender.release();
+  camera.release();
   const quantile = (values, q) => [...values].sort((a, b) => a - b)[Math.floor(q * (values.length - 1))];
   return {
     directory, width, height, frames, errors,

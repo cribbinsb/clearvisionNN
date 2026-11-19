@@ -1,4 +1,5 @@
-// The models the page can run: `models/manifest.json` lists directories, each
+// The models the page can run: `models/manifest.json` lists directories (and may
+// name the one to open on, `first`), each
 // holding a contract `model.json` and the network file it names: `model.onnx`
 // (float arithmetic) or `model.i8` (8-bit integer), both written by the exporters.
 
@@ -17,7 +18,8 @@ export async function loadModels() {
     // Contracts written before the integer form existed describe a graph without saying so.
     const network = contract.network ?? 'onnx';
     const file = network === 'integer' ? contract.integer.file : ONNX_FILE;
-    return { ...contract, network, directory, url: new URL(file, base).href };
+    // The list runs from the smallest model up; the manifest names the one the page opens on.
+    return { ...contract, network, directory, opensFirst: directory === manifest.first, url: new URL(file, base).href };
   }));
 }
 
