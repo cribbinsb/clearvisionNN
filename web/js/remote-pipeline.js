@@ -17,7 +17,7 @@ export function createPipelineHost() {
     const { resolve, reject } = waiting.get(data.id);
     waiting.delete(data.id);
     if (data.error === undefined) resolve(data.value);
-    else reject(new Error(data.error));
+    else reject(Object.assign(new Error(data.error), { code: data.code }));
   };
   // The worker itself failed (it could not load, say): nothing waiting will be answered.
   worker.onerror = (event) => {

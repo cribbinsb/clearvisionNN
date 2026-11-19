@@ -25,7 +25,7 @@ function serve(scope) {
       const pictures = value ? [value.original, value.input, value.output] : [];
       scope.postMessage({ id: data.id, value }, pictures);
     } catch (error) {
-      scope.postMessage({ id: data.id, error: error?.message ?? String(error) });
+      scope.postMessage({ id: data.id, error: error?.message ?? String(error), code: error?.code });
     }
   };
 }

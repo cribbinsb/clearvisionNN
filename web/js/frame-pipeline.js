@@ -48,7 +48,9 @@ export async function createPipeline(model, backendId, width, height, degrade, t
     if (sent.gap) upscaler.restart();
     const result = await upscaler.process(sent.frame, sent.coding);
     const [input, output] = await Promise.all([result.conventional, result.upscaled].map(asBitmap));
-    return { original: sent.original, input, output, timings: { ...sent.timings, ...result.timings }, info: sent.info };
+    // `variant`: how a GPU upscaler's shaders came to be written, for the page's diagnostics.
+    const info = { ...sent.info, ...(result.variant && { variant: result.variant }) };
+    return { original: sent.original, input, output, timings: { ...sent.timings, ...result.timings }, info };
   }
 
   return {
