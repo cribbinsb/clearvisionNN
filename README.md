@@ -1,13 +1,16 @@
 # clearvisionNN
 
+[![crates.io](https://img.shields.io/crates/v/clearvisionnn.svg)](https://crates.io/crates/clearvisionnn) [![docs.rs](https://img.shields.io/docsrs/clearvisionnn)](https://docs.rs/clearvisionnn) [![Code: BSD-3-Clause](https://img.shields.io/badge/code-BSD--3--Clause-blue.svg)](LICENSE) [![Weights: CC BY-NC 4.0](https://img.shields.io/badge/weights-CC%20BY--NC%204.0-orange.svg)](web/models/LICENSE.md)
+
 Fast, causal 2× video super-resolution that runs in a browser tab. It is built
 for two kinds of input: camera video straight from the camera's own
 processing, and video that has been through a real-time H.264/H.265 encode and
 decode, as on a video call. It keeps the picture steady from frame to frame,
 which matters as much as sharpness once the video moves.
 
-**Live demo:** <https://cribbinsb.github.io/clearvisionNN/> (needs a browser
-with WebGPU for the 8-bit models).
+**[Try the browser demo](https://cribbinsb.github.io/clearvisionNN/)** (needs WebGPU for the 8-bit models) ·
+**[Rust crate](https://crates.io/crates/clearvisionnn)** · [API docs](https://docs.rs/clearvisionnn) ·
+[Training recipe](recipe/README.md) · [Architecture](docs/ARCHITECTURE.md) · [8-bit arithmetic](docs/INTEGER.md)
 
 ## What it does
 
@@ -132,11 +135,22 @@ in `tools/nanocodec.rev`.
 
 ## Use from Rust
 
-The Rust side is on crates.io. One crate gathers the rest:
+`cargo add clearvisionnn --features models`
+([crates.io](https://crates.io/crates/clearvisionnn), [docs](https://docs.rs/clearvisionnn)), or in `Cargo.toml`:
 
 ```toml
 clearvisionnn = { version = "0.1", features = ["models"] }
 ```
+
+```rust
+use clearvisionnn::models::Size;
+use clearvisionnn::runtime::integer::IntegerModel;
+
+// The medium model, built in by the `models` feature.
+let model = IntegerModel::from_words(&Size::M.words())?;
+```
+
+One crate gathers the rest:
 
 | Crate | What it holds | Licence |
 |---|---|---|
