@@ -1,0 +1,21 @@
+[package]
+name = "cvnn-py"
+description = "clearvisionnn Python bindings to the pre-process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "clearvisionnn_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+cvnn-common.workspace = true
+cvnn-preproc.workspace = true
+cvnn-runtime.workspace = true
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
+numpy = "0.23"
+
+[lints]
+workspace = true

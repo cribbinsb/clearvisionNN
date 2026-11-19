@@ -1,0 +1,23 @@
+# The flat small model on VCD as a real sender would produce it: camera
+# noise first, then the sender's downscale, then the real-time codec.
+base: vcd.yaml
+pipeline:
+  degrade:
+    chain:
+      - type: noise
+        params: {sigma: [1.0, 5.0], skew: 1.0}
+      - type: scale
+        params: {kernels: [bicubic]}
+      - type: codec
+        params:
+          codecs: [libx264, libx265]
+          bits_per_pixel: [0.04, 0.3]
+          probability: 0.9
+model: {layout: flat, size: s, planes: y, temporal: none, side_planes: false}
+train:
+  steps: 3000
+  validate_every: 500
+  checkpoint_every: 1000
+  warmup_steps: 100
+  validation_clips: 64
+  data: {frames: 2, batch: 24, workers: 12, reset_share: 0.0}

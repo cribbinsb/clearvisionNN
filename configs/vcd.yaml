@@ -1,0 +1,19 @@
+# Microsoft VCD: 160 ten-second 1080p talking-head clips (data licence CC BY 4.0;
+# fetched into datasets/vcd1 by the commands in docs/PROCEDURES.md).
+base: codec.yaml
+name: vcd
+work_dir: work/vcd
+sources:
+  - name: vcd
+    root: datasets/vcd1
+    licence: CC-BY-4.0
+    commercial_use: true
+pipeline:
+  segment: {frames: 64, max_per_file: 4}
+  split: {validation: 0.15, test: 0.15}
+  disk_budget_gb: 40
+train:
+  # While the stability measures are being calibrated the guard only rejects
+  # gross flicker: a pixel-trained model already changes about 25% more than
+  # the original in still regions.
+  temporal_tolerance: 1.0

@@ -1,0 +1,10 @@
+# The flat layout on VCD after the real-time codec chain.
+base: vcd.yaml
+model: {layout: flat, size: s, planes: y, temporal: none}
+train:
+  steps: 3000
+  validate_every: 500
+  checkpoint_every: 1000
+  warmup_steps: 100
+  validation_clips: 64
+  data: {frames: 2, batch: 24, workers: 12, reset_share: 0.0}

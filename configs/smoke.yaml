@@ -1,0 +1,22 @@
+# A few files and a small network: checks the whole path end to end in minutes.
+base: codec.yaml
+name: smoke
+work_dir: work/smoke
+sources:
+  - name: chad
+    root: datasets/CHAD/CHAD_Videos
+    max_files: 6
+  - name: personpath22
+    root: datasets/personpath22/dataset/personpath22/raw_data
+    max_files: 8
+pipeline:
+  segment: {frames: 32, max_per_file: 2}
+  split: {validation: 0.2, test: 0.2}
+model: {size: s}
+train:
+  steps: 1500
+  validate_every: 250
+  checkpoint_every: 500
+  warmup_steps: 20
+  validation_clips: 4
+  data: {batch: 4, frames: 4, workers: 4}

@@ -1,0 +1,24 @@
+# Meta VC-1K: about 15-second video-call recordings made by participants on
+# their own phones (720p, the phone's own H.264 at high quality); a fixed random
+# 600 of the 930 even-frame-rate clips. work/sources/vc1k_train holds links to
+# those files in datasets/vc1k (subset_600.txt there)
+# (docs/PROCEDURES.md). Data licence: CC BY-NC 4.0, so a model trained with it
+# is for non-commercial use only and must say so.
+base: codec.yaml
+name: vc1k
+work_dir: work/vc1k
+sources:
+  - name: vc1k
+    root: work/sources/vc1k_train
+    glob: "*.[mM][oOpP][vV4]"  # .mp4 from Android, .mov or .MOV from iOS
+    licence: CC-BY-NC-4.0
+    commercial_use: false
+pipeline:
+  # Short segments, two per file: each clip a loader reads is decoded whole into
+  # the frame cache, so clip length sets the disk the dataset needs.
+  segment: {frames: 32, max_per_file: 2}
+  split: {validation: 0.1, test: 0.1}
+  disk_budget_gb: 40
+  workers: 4
+train:
+  temporal_tolerance: 1.0

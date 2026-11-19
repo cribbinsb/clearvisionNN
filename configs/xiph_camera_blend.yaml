@@ -1,0 +1,34 @@
+# The Xiph evaluation clips under the same degradation as the VCD camera runs.
+base: xiph_eval.yaml
+pipeline:
+  degrade:
+    variants_per_clip: 1
+    chain:
+    - type: noise
+      params:
+        sigma:
+        - 1.0
+        - 5.0
+        skew: 1.0
+    - type: denoise
+      params:
+        probability: 0.7
+    - type: scale
+      params:
+        kernels:
+        - bicubic
+model:
+  layout: flat
+  size: s
+  planes: y
+  temporal: blend
+  align: true
+  side_planes: false
+train:
+  temporal_tolerance: 1.0
+  validation_clips: 64
+  data:
+    frames: 6
+    batch: 8
+    workers: 12
+    reset_share: 0.0

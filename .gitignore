@@ -1,0 +1,11 @@
+/target/
+/.venv/
+/work/
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.so
+/web/pkg/
+/web/nanocodec/

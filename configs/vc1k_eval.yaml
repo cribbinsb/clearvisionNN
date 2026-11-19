@@ -1,0 +1,17 @@
+# The 330 VC-1K clips kept out of training: real phone-call footage as an
+# evaluation-only set. work/sources/vc1k_eval holds links to those files in
+# datasets/vc1k (listed there in rest_330.txt).
+# Data licence: CC BY-NC 4.0.
+base: vc1k.yaml
+name: vc1k-eval
+work_dir: work/vc1k_eval
+sources:
+  - name: vc1k_eval
+    root: work/sources/vc1k_eval
+    glob: "*.[mM][oOpP][vV4]"
+    licence: CC-BY-NC-4.0
+    commercial_use: false
+pipeline:
+  segment: {frames: 32, max_per_file: 1}
+  # Nothing is sealed away: the whole set exists to be scored.
+  split: {validation: 0.5, test: 0.0}

@@ -1,0 +1,42 @@
+# A quick check of the model and training recipe on sources known to be clean
+# (raw and lossless test sequences), with no codec: a small network should
+# gain clearly over bicubic here. Minutes, not hours.
+base: codec.yaml
+name: sanity-clean
+work_dir: work/sanity
+sources:
+  - name: uvg_vcm
+    root: datasets/uvg_vcm
+    glob: "**/*.yuv"
+    raw: {width: 3840, height: 2160, pix_fmt: yuv444p16le, fps: 60}
+  - name: nc_xiph
+    root: ../nanocodec-data/clips/xiph
+    glob: "**/*.mkv"
+  - name: nc_svt
+    root: ../nanocodec-data/clips/svt
+    glob: "**/*.mkv"
+  - name: nc_blender
+    root: ../nanocodec-data/clips/blender
+    glob: "**/*.mkv"
+  - name: nc_pristine
+    root: ../nanocodec-data/clips/pristine
+    glob: "**/*.y4m"
+pipeline:
+  segment: {frames: 32, max_per_file: 8}
+  split: {validation: 0.2, test: 0.1}
+  disk_budget_gb: 30
+  # Few workers: each holds a whole clip in floating point while degrading it.
+  workers: 4
+  degrade:
+    variants_per_clip: 1
+    chain:
+      - type: scale
+        params: {kernels: [area, bicubic, lanczos]}
+model: {layout: unet, size: s, planes: y, temporal: none}
+train:
+  steps: 4000
+  validate_every: 500
+  checkpoint_every: 1000
+  warmup_steps: 100
+  validation_clips: 64
+  data: {frames: 2, batch: 24, workers: 16, reset_share: 0.0}

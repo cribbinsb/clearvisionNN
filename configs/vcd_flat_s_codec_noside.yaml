@@ -1,0 +1,3 @@
+# The flat small model without the pre-process side planes: do they earn their place?
+base: vcd_flat_s_codec.yaml
+model: {side_planes: false}

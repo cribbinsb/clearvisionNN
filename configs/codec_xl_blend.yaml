@@ -1,0 +1,7 @@
+# Phase 3: the main temporal candidate, motion-compensated recursive blend.
+base: codec.yaml
+model: {layout: unet, size: xl, planes: y, temporal: blend, align: true}
+train:
+  steps: 40000
+  losses: {charbonnier: 1.0, temporal_difference: 1.0}
+  data: {frames: 8, batch: 6, workers: 20, reset_share: 0.15}

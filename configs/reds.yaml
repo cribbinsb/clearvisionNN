@@ -1,0 +1,23 @@
+# REDS (Nah et al., NTIRE 2019): GoPro street and outdoor scenes, the 240
+# training sequences of sharp frames (train_sharp, 100 frames each, 1280x720),
+# each re-encoded losslessly (FFV1, BT.709 limited range, 24 fps) from its PNG
+# frames into datasets/reds/mkv (LICENCE.txt beside it).
+# Data licence: CC BY 4.0, so commercial use is allowed, with attribution.
+base: codec.yaml
+name: reds
+work_dir: work/reds
+sources:
+  - name: reds
+    root: datasets/reds/mkv
+    glob: "*.mkv"
+    licence: CC-BY-4.0
+    commercial_use: true
+pipeline:
+  # Short segments, two per file: each clip a loader reads is decoded whole into
+  # the frame cache, so clip length sets the disk the dataset needs.
+  segment: {frames: 32, max_per_file: 2}
+  split: {validation: 0.1, test: 0.1}
+  disk_budget_gb: 40
+  workers: 3
+train:
+  temporal_tolerance: 1.0

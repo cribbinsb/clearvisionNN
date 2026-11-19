@@ -1,0 +1,21 @@
+# The flat small model on VCD as a camera would deliver it: sensor noise, the
+# camera's own denoise (most of the time), then the downscale.
+base: vcd.yaml
+pipeline:
+  degrade:
+    variants_per_clip: 1
+    chain:
+      - type: noise
+        params: {sigma: [1.0, 5.0], skew: 1.0}
+      - type: denoise
+        params: {probability: 0.7}
+      - type: scale
+        params: {kernels: [bicubic]}
+model: {layout: flat, size: s, planes: y, temporal: none, side_planes: false}
+train:
+  steps: 3000
+  validate_every: 500
+  checkpoint_every: 1000
+  warmup_steps: 100
+  validation_clips: 64
+  data: {frames: 2, batch: 24, workers: 12, reset_share: 0.0}

@@ -1,0 +1,16 @@
+# Standard test sequences from media.xiph.org/video/derf (park joy, crowd run,
+# riverbed and others; fetched into datasets/xiph_derf by the commands in
+# docs/PROCEDURES.md) as an evaluation-only set of fast and difficult motion.
+# Their licences have not been checked: score on them, do not train on them.
+base: sanity_clean.yaml
+name: xiph-eval
+work_dir: work/xiph
+sources:
+  - name: xiph
+    root: datasets/xiph_derf
+    glob: "*.y4m"
+pipeline:
+  segment: {frames: 32, max_per_file: 4}
+  # Nothing is sealed away: the whole set exists to be scored.
+  split: {validation: 0.5, test: 0.0}
+  disk_budget_gb: 30

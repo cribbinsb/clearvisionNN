@@ -1,0 +1,24 @@
+# Case B: video after a real-time encode and decode (DESIGN.md section 9.3).
+base: sources.yaml
+name: codec
+work_dir: work/general
+pipeline:
+  degrade:
+    variants_per_clip: 2
+    chain:
+      - type: scale
+        # One known kernel: the sender's scaler is ours to choose, and a network
+        # recovers more from a known, properly filtered downscale than from a mix.
+        params: {kernels: [bicubic]}
+      - type: codec
+        params:
+          codecs: [libx264, libx265]
+          bits_per_pixel: [0.04, 0.3]
+          probability: 0.9
+model:
+  layout: unet
+  size: xl
+  planes: y
+  temporal: none
+train:
+  losses: {charbonnier: 1.0}

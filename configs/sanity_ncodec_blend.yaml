@@ -1,0 +1,40 @@
+# Varied clean sources (camera motion, sport, animation, raw 4K) under the same
+# degradation as the VCD runs: a second domain to test what was learnt on talking heads.
+base: sanity_clean.yaml
+pipeline:
+  degrade:
+    chain:
+    - type: noise
+      params:
+        sigma:
+        - 1.0
+        - 5.0
+        skew: 1.0
+    - type: scale
+      params:
+        kernels:
+        - bicubic
+    - type: codec
+      params:
+        codecs:
+        - libx264
+        - libx265
+        bits_per_pixel:
+        - 0.04
+        - 0.3
+        probability: 0.9
+model:
+  layout: flat
+  size: s
+  planes: y
+  temporal: blend
+  align: true
+  side_planes: false
+train:
+  temporal_tolerance: 1.0
+  validation_clips: 64
+  data:
+    frames: 6
+    batch: 8
+    workers: 12
+    reset_share: 0.0

@@ -1,0 +1,21 @@
+# Microsoft VCD2: camera-native talking-head recordings, lossless (FFV1), from
+# many participants and webcams; a fixed random 200 of the 838 clips, fetched
+# into datasets/vcd2 (docs/PROCEDURES.md). Data licence: CDLA-Permissive-2.0.
+base: codec.yaml
+name: vcd2
+work_dir: work/vcd2
+sources:
+  - name: vcd2
+    root: datasets/vcd2
+    glob: "*.mkv"
+    licence: CDLA-Permissive-2.0
+    commercial_use: true
+pipeline:
+  # Short segments, two per file: each clip a loader reads is decoded whole into
+  # the frame cache, so clip length sets the disk the dataset needs.
+  segment: {frames: 32, max_per_file: 2}
+  split: {validation: 0.1, test: 0.1}
+  disk_budget_gb: 45
+  workers: 4
+train:
+  temporal_tolerance: 1.0

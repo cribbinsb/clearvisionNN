@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clearvisionnn"
+version = "0.1.0"
+description = "Fast causal video super-resolution: data pipeline, training and evaluation"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+# Tested with torch 2.12, numpy 1.26, av 14.3, opencv 4.12, onnxruntime 1.22.
+dependencies = ["numpy", "torch", "pydantic>=2", "pyyaml", "av", "opencv-python"]
+
+[project.optional-dependencies]
+evaluate = ["lpips", "pytorch-msssim"]
+export = ["onnx", "onnxruntime"]
+dev = ["pytest", "ruff", "mypy", "types-PyYAML", "maturin", "playwright"]
+
+[project.scripts]
+clearvisionnn = "clearvisionnn.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+include = ["clearvisionnn*"]
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["python"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N", "D", "PL", "RUF"]
+ignore = [
+    "D203", "D213",   # one docstring style: no blank line before class, summary on first line
+    "D105", "D107",   # magic methods and __init__ are documented on the class
+    "D401",           # docstrings describe what is returned, as noun phrases
+    "PLR2004",        # tests and pixel maths compare against literals
+]
+
+[tool.ruff.lint.per-file-ignores]
+"python/tests/*" = ["D"]
+# Commands import their subsystem lazily, so `clearvisionnn pipeline` does not load torch.
+"python/clearvisionnn/cli/main.py" = ["PLC0415"]
+# Pydantic copies mutable defaults per instance.
+"python/clearvisionnn/config/*" = ["RUF012"]
+
+[tool.ruff.lint.pylint]
+max-args = 7
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "python"
+packages = ["clearvisionnn"]
+strict = true
+ignore_missing_imports = true
+disallow_untyped_calls = false
+disallow_any_generics = false
+warn_return_any = false

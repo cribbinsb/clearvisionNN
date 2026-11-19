@@ -1,0 +1,14 @@
+[package]
+name = "cvnn-runtime"
+description = "clearvisionnn runtime: per-stream state and everything around the network (upscale, warp, blend)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cvnn-common.workspace = true
+cvnn-preproc.workspace = true
+
+[lints]
+workspace = true

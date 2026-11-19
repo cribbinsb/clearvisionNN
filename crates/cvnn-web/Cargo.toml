@@ -1,0 +1,21 @@
+[package]
+name = "cvnn-web"
+description = "clearvisionnn browser bindings: the runtime session as a WebAssembly module"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cvnn-preproc.workspace = true
+cvnn-runtime.workspace = true
+# Pinned: the wasm-bindgen command that post-processes the module must match exactly.
+wasm-bindgen = "=0.2.105"
+# Typed arrays handed to the page: the release built against that wasm-bindgen.
+js-sys = "=0.3.82"
+
+[lints]
+workspace = true

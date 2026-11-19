@@ -1,0 +1,10 @@
+# The flat small model fine-tuned to look like the original, not only to match
+# it: a perceptual distance, with the low frequencies held to the original's.
+base: vcd_flat_s_codec_noside.yaml
+train:
+  init_from_run: flat_s-codec-noside
+  steps: 2000
+  lr: 1.0e-4
+  # LPIPS's gradient is about 300 times the Charbonnier loss's at equal weight.
+  losses: {charbonnier: 1.0, downscale_match: 10.0, lpips: 0.1}
+  best_by: lpips

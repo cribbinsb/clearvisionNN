@@ -1,0 +1,17 @@
+# The small model on VCD with downscaling only: the nearest match to
+# published small-model results on this dataset.
+base: vcd.yaml
+pipeline:
+  degrade:
+    variants_per_clip: 1
+    chain:
+      - type: scale
+        params: {kernels: [bicubic]}
+model: {layout: unet, size: s, planes: y, temporal: none}
+train:
+  steps: 3000
+  validate_every: 500
+  checkpoint_every: 1000
+  warmup_steps: 100
+  validation_clips: 64
+  data: {frames: 2, batch: 24, workers: 12, reset_share: 0.0}

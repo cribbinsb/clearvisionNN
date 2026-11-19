@@ -1,0 +1,8 @@
+# The temporal model at the small size: previous output and hidden state,
+# warped by the pre-process's motion, blended with the new estimate.
+base: vcd_flat_s_ncodec_noside.yaml
+model: {temporal: blend, align: true}
+train:
+  # Six frames per sample at a third of the batch: the same frames per step
+  # as the per-frame runs it is compared with.
+  data: {frames: 6, batch: 8, workers: 12, reset_share: 0.15}

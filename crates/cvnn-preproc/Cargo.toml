@@ -1,0 +1,16 @@
+[package]
+name = "cvnn-preproc"
+description = "clearvisionnn pre-process: motion field and side planes from nanocodec's source analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+cvnn-common.workspace = true
+nc-common.workspace = true
+nc-dsp.workspace = true
+nc-analysis.workspace = true
+
+[lints]
+workspace = true

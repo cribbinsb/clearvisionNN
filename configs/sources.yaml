@@ -1,0 +1,22 @@
+# The source registry for general development. Licences are not yet audited:
+# every entry is marked not-for-commercial-use until checked (DESIGN.md section 9.4).
+sources:
+  - name: uvg_vcm
+    root: datasets/uvg_vcm
+    glob: "**/*.yuv"
+    raw: {width: 3840, height: 2160, pix_fmt: yuv444p16le, fps: 60}
+  - name: personpath22
+    root: datasets/personpath22/dataset/personpath22/raw_data
+  - name: chad
+    root: datasets/CHAD/CHAD_Videos
+  - name: otw
+    root: datasets/otw
+  - name: jaad
+    root: datasets/JAAD/JAAD_clips
+
+# Both cases draw on the same clean targets, so they share one work directory;
+# each degradation chain keeps its own variants inside it.
+pipeline:
+  segment: {frames: 64, max_per_file: 3}
+  workers: 16
+  disk_budget_gb: 90

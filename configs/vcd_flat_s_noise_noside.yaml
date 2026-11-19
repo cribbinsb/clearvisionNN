@@ -1,0 +1,19 @@
+# The flat small model on VCD downscaled and then given sensor noise: input
+# in which neighbouring frames do carry independent information.
+base: vcd.yaml
+pipeline:
+  degrade:
+    variants_per_clip: 1
+    chain:
+      - type: scale
+        params: {kernels: [bicubic]}
+      - type: noise
+        params: {sigma: [2.0, 6.0], skew: 1.0}
+model: {layout: flat, size: s, planes: y, temporal: none, side_planes: false}
+train:
+  steps: 3000
+  validate_every: 500
+  checkpoint_every: 1000
+  warmup_steps: 100
+  validation_clips: 64
+  data: {frames: 2, batch: 24, workers: 12, reset_share: 0.0}

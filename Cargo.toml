@@ -1,0 +1,53 @@
+# clearvisionNN Cargo workspace. Layout and rules: CLAUDE.md, docs/ARCHITECTURE.md.
+
+[workspace]
+resolver = "3"
+members = [
+    "crates/cvnn-common",
+    "crates/cvnn-preproc",
+    "crates/cvnn-runtime",
+    "crates/cvnn-py",
+    "crates/cvnn-web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "BSD-3-Clause"
+
+[workspace.dependencies]
+cvnn-common = { path = "crates/cvnn-common" }
+cvnn-preproc = { path = "crates/cvnn-preproc" }
+cvnn-runtime = { path = "crates/cvnn-runtime" }
+# nanocodec is used from a sibling checkout (../nanocodec) until its analysis
+# crate is published; see docs/PROCEDURES.md.
+nc-common = { package = "nanocodec-common", path = "../nanocodec/crates/nc-common" }
+nc-dsp = { package = "nanocodec-dsp", path = "../nanocodec/crates/nc-dsp" }
+nc-analysis = { package = "nanocodec-analysis", path = "../nanocodec/crates/nc-analysis" }
+
+[workspace.lints.rust]
+# `deny`, not `forbid`: cvnn-py's binding macros expand to `unsafe` glue. Every
+# other crate additionally has `#![forbid(unsafe_code)]`.
+unsafe_code = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Pixel code converts between integer and float widths constantly, always with
+# known ranges; these lints would bury real findings.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+cast_lossless = "allow"
+
+[profile.release]
+opt-level = 3
+
+# The browser module: whole-program optimisation, as it is downloaded and runs on one thread.
+[profile.web]
+inherits = "release"
+lto = true
+codegen-units = 1

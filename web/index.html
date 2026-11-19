@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f5f0">
+  <title>clearvisionNN · live video super-resolution</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">◈</span> clearvision<span>NN</span></a>
+  <span class="local-badge"><i></i>Runs on this device · no video leaves the page</span>
+</header>
+<main>
+  <section class="intro">
+    <div>
+      <p class="eyebrow">LIVE VIDEO SUPER-RESOLUTION</p>
+      <h1>Twice the resolution, as it plays.</h1>
+      <p class="lede">The original is reduced to half size to make the input; the network makes the output from the input alone.</p>
+    </div>
+  </section>
+
+  <section class="bar" aria-label="Source, model and playback">
+    <label class="field"><span class="control-label">SOURCE</span><select id="source"></select></label>
+    <input id="file" type="file" accept="video/*" hidden>
+    <label class="field grow"><span class="control-label">MODEL</span><select id="model"></select></label>
+    <label class="field grow"><span class="control-label">INPUT</span><select id="preset"></select></label>
+    <div class="transport">
+      <button id="pause" class="primary" type="button" disabled>Pause</button>
+      <button id="step" class="quiet" type="button" disabled title="While paused: let one more frame through">Step ›</button>
+    </div>
+  </section>
+  <div class="session-row"><span id="credit"></span><span id="status" role="status">Loading…</span></div>
+
+  <section class="viewer" aria-label="The picture">
+    <div class="viewer-top">
+      <div class="segmented" role="radiogroup" aria-label="What the picture shows">
+        <label><input type="radio" name="view" value="original"> Original</label>
+        <label><input type="radio" name="view" value="input"> Input (bicubic)</label>
+        <label><input type="radio" name="view" value="output"> Output</label>
+        <label><input type="radio" name="view" value="split" checked> Input | output</label>
+        <label><input type="radio" name="view" value="magnify"> Magnify</label>
+      </div>
+      <label class="field inline">Magnification
+        <select id="zoom">
+          <option value="2">2×</option>
+          <option value="4" selected>4×</option>
+          <option value="8">8×</option>
+          <option value="16">16×</option>
+        </select>
+      </label>
+      <span class="view-hint">Scroll or pinch to zoom · drag to pan · double-click to reset</span>
+    </div>
+    <div class="viewport"><canvas id="view"></canvas></div>
+    <input id="split" type="range" min="0" max="1000" value="500" aria-label="Divider position">
+    <div class="metrics" aria-label="Speed">
+      <div class="metric"><span class="control-label">FRAMES PER SECOND SHOWN</span><b id="fps">–</b></div>
+      <div class="metric"><span class="control-label">UPSCALER ALONE COULD DO</span><b id="upscalerFps">–</b></div>
+      <div class="metric"><span class="control-label">NETWORK</span><b id="network">–</b></div>
+      <div class="metric"><span class="control-label">BITRATE AT 30 FPS</span><b id="bitrate">–</b></div>
+    </div>
+  </section>
+
+  <details class="card" id="settings">
+    <summary>Size and backend <span>+</span></summary>
+    <div class="controls">
+      <label class="field"><span class="control-label">ORIGINAL SIZE</span>
+        <select id="size">
+          <option value="640x360">640 × 360</option>
+          <option value="960x544">960 × 544</option>
+          <option value="1280x720" selected>1280 × 720</option>
+          <option value="1920x1080">1920 × 1080</option>
+        </select>
+      </label>
+      <label class="field"><span class="control-label">BACKEND</span><select id="backend"></select></label>
+      <p id="modelNote" class="note"></p>
+    </div>
+  </details>
+
+  <details class="card" id="advanced">
+    <summary>Degrade the input, step by step <span>+</span></summary>
+      <div class="controls">
+        <label><span>Lens blur: <output id="blurValue" for="blur">0.0</output> pixels</span>
+          <input id="blur" type="range" min="0" max="1.5" step="0.1" value="0">
+        </label>
+        <label><span>Sensor noise: <output id="noiseValue" for="noise">0.0</output> grey levels</span>
+          <input id="noise" type="range" min="0" max="8" step="0.5" value="0">
+        </label>
+        <label><span>Camera denoise: <output id="denoiseValue" for="denoise">0.0</output> (0 is off)</span>
+          <input id="denoise" type="range" min="0" max="12" step="1" value="0">
+        </label>
+        <label>2× reduction <select id="kernel"></select></label>
+        <label>Codec <select id="codec"></select></label>
+        <label>Rate <select id="rate"></select></label>
+        <label>Key frames
+          <select id="keyint">
+            <option value="30">every 30 frames</option>
+            <option value="60">every 60 frames</option>
+            <option value="300">every 300 frames</option>
+            <option value="0" selected>the first only</option>
+          </select>
+        </label>
+        <label class="choice"><input type="checkbox" id="tellModel" checked> Tell the model each frame's quantiser and type</label>
+      </div>
+      <p id="codecNote" class="note"></p>
+    </details>
+  <details class="card">
+    <summary>Timings, step by step <span>+</span></summary>
+  <table id="stats" aria-label="Timings">
+    <tr><th colspan="2" class="group">Upscaler</th></tr>
+    <tr><th>Before the network: motion search (WebAssembly); with a WebAssembly runtime, also upscale and warp</th><td id="prepare">–</td></tr>
+    <tr><th>After the network: blend and colour, with a WebAssembly runtime</th><td id="finish">–</td></tr>
+    <tr><th colspan="2" class="group">Simulated sender and channel (not part of the upscaler)</th></tr>
+    <tr><th>Camera: blur, noise, denoise and 2× reduction (WebAssembly)</th><td id="degrade">–</td></tr>
+    <tr><th>Encode and decode (WebCodecs)</th><td id="codec-time">–</td></tr>
+    <tr><th>Newest frame</th><td id="coding">–</td></tr>
+  </table>
+  </details>
+
+  <details class="card">
+    <summary>How to read this page <span>+</span></summary>
+    <div class="detail-grid">
+      <p><strong>Three pictures of one moment</strong><br>The original, the input as an ordinary bicubic enlargement (what a
+        player would show without the network), and the network's output. In Magnify, press or drag in the top-left
+        picture to choose the region.</p>
+      <p><strong>Everything on this device</strong><br>The camera simulation, the reduction and the motion search are Rust
+        compiled to WebAssembly. An 8-bit model then runs entirely on the GPU, in the page's own WebGPU shaders, in
+        integer arithmetic checked bit for bit against the Rust reference.</p>
+      <p><strong>Float models</strong><br>Their upscale, warp and blend stay in WebAssembly, and the network runs through
+        ONNX Runtime Web on the chosen backend. The optional codec is the browser's own, through WebCodecs, or nanocodec.</p>
+    </div>
+  </details>
+</main>
+<footer>
+  <span>clearvisionNN / live video super-resolution</span>
+  <span>Sample clips belong to their rights holders: <a href="clips/ATTRIBUTION.md">attribution</a></span>
+</footer>
+<pre id="report" hidden></pre>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

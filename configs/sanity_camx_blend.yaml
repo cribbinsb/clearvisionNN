@@ -1,0 +1,23 @@
+# The wider camera chain: optical blur, sensor noise, the camera's denoise (half
+# the time), a downscale by any of four kernels, then Motion JPEG (sometimes).
+# It covers senders the plain camera chain does not, such as the other team's test input.
+base: sanity_clean.yaml
+pipeline:
+  degrade:
+    variants_per_clip: 1
+    chain:
+      - type: blur
+        params: {sigma: [0.0, 1.2]}
+      - type: noise
+        params: {sigma: [1.0, 5.0], skew: 1.0}
+      - type: denoise
+        params: {probability: 0.5}
+      - type: scale
+        params: {kernels: [area, bilinear, bicubic, lanczos]}
+      - type: jpeg
+        params: {quality: [70, 95], probability: 0.4}
+model: {layout: flat, size: s, planes: y, temporal: blend, align: true, side_planes: false}
+train:
+  temporal_tolerance: 1.0
+  validation_clips: 64
+  data: {frames: 6, batch: 8, workers: 12, reset_share: 0.0}

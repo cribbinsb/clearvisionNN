@@ -1,0 +1,25 @@
+# Case A: camera output after the ISP (DESIGN.md section 9.2). The whole chain
+# runs during training, so every epoch sees fresh draws.
+base: sources.yaml
+name: camera
+work_dir: work/general
+pipeline:
+  degrade:
+    chain:
+      - type: blur
+        params: {sigma: [0.0, 1.5]}
+      - type: scale
+        params: {kernels: [area]}
+      - type: noise
+        params: {sigma: [0.0, 4.0]}
+      - type: denoise
+        params: {probability: 0.7}
+      - type: sharpen
+        params: {probability: 0.35}
+model:
+  layout: unet
+  size: xl
+  planes: y
+  temporal: none
+train:
+  losses: {charbonnier: 1.0}

@@ -1,0 +1,8 @@
+# Phase 2: the top model with no temporal input; the bar the temporal design must beat.
+base: codec.yaml
+model: {layout: unet, size: xl, planes: y, temporal: none}
+train:
+  steps: 40000
+  # Frames of one window are nearly the same picture, so a per-frame model
+  # learns more from many short windows than from a few long ones.
+  data: {frames: 2, batch: 24, workers: 20, reset_share: 0.0}
