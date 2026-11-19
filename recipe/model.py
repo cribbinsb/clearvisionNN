@@ -18,7 +18,7 @@ from torch import nn
 from clearvisionnn.contract import BLOCK_SIZE, CODING_CHANNELS, SR_SCALE
 from clearvisionnn.data.batch import Degraded, SequenceBatch
 from clearvisionnn.models.blocks import RepConv, conv_relu, stack, zero_init
-from clearvisionnn.models.resample import block_field_to_flow, upscale, warp
+from clearvisionnn.models.resample import block_field_to_flow, upscale
 from recipe.options import Options
 
 # One output sample per position of the 2x2 cell each input sample becomes.
@@ -72,32 +72,48 @@ class Model(nn.Module):
         keep: torch.Tensor | float = 1.0
         if self.training:
             keep = (torch.rand(batch, 1, device=luma.device) >= options.coding_dropout).float()
+        # A stream starts at the first frame, and wherever every sequence of the
+        # batch cuts (for a single stream, every flagged cut). Asked of the GPU
+        # once: asking frame by frame makes it wait every frame.
+        starts = view.reset.all(dim=0).tolist()
+        starts[0] = True
+        # Everything that does not depend on the network's own output is done
+        # for all frames in one call each: a step's time is mostly the number
+        # of small GPU calls, whatever the network's size.
+        low = block_field_to_flow(view.motion.flatten(0, 1), height, width)
+        high = SR_SCALE * F.interpolate(
+            low, scale_factor=SR_SCALE, mode="bilinear", align_corners=False
+        )
+        from_low, from_high = _sampling_grid(low), _sampling_grid(high)
+        base = upscale(view.frames.flatten(0, 1))[:, :1].unflatten(0, (batch, frames))
+        earlier = torch.cat([luma[:, :1], luma[:, :-1]], 1).flatten(0, 1)
+        carried = _sample(earlier, from_low).unflatten(0, (batch, frames))
+        # A frame that starts a stream is its own prediction: the motion is trusted there.
+        starting = torch.tensor(starts, device=luma.device)[None, :, None, None, None]
+        before = torch.where(starting, luma, carried).flatten(0, 1)
+        confidence = _confidence(luma.flatten(0, 1), before).unflatten(0, (batch, frames))
+        from_low = from_low.unflatten(0, (batch, frames))
+        from_high = from_high.unflatten(0, (batch, frames))
+        coding = view.coding * (keep[:, None] if self.training else 1.0)  # type: ignore[index]
+        coding = coding[..., None, None].expand(-1, -1, -1, height, width).to(luma.dtype)
         outputs: list[torch.Tensor] = []
-        state = previous = luma  # replaced on the first frame, which always resets
-        # Asked of the GPU once for the whole sequence: asking frame by frame makes it wait every frame.
-        cuts = view.reset.all(dim=0).tolist()
+        state = previous = luma  # replaced on the first frame, which always starts a stream
         for t in range(frames):
-            current = luma[:, t]
-            base = upscale(view.frames[:, t])[:, :1]
-            # History is dropped only when every sequence of the batch cuts
-            # here, which for a single stream is every flagged cut.
-            if t == 0 or cuts[t]:
-                state = current.new_zeros(batch, options.state_channels, height, width)
-                previous, before = base, current
+            if starts[t]:
+                state = luma.new_zeros(batch, options.state_channels, height, width)
+                previous = base[:, t]
             else:
-                low, high = motion_flows(view, t)
-                state, previous = warp(state, low), warp(previous, high)
-                before = warp(luma[:, t - 1], low)
-            coding = (view.coding[:, t] * keep)[:, :, None, None].expand(-1, -1, height, width)
+                state = _sample(state, from_low[:, t])
+                previous = _sample(previous, from_high[:, t])
             planes = [
-                current,
-                _confidence(current, before),
+                luma[:, t],
+                confidence[:, t],
                 state,
                 F.pixel_unshuffle(previous, SR_SCALE),
-                coding.to(current.dtype),
+                coding[:, t],
             ]
             out = trunk(torch.cat(planes, 1))
-            previous = base + F.pixel_shuffle(out[:, :DETAIL_CHANNELS], SR_SCALE)
+            previous = base[:, t] + F.pixel_shuffle(out[:, :DETAIL_CHANNELS], SR_SCALE)
             state = torch.tanh(out[:, DETAIL_CHANNELS:])
             if options.round_state:
                 # Rounded in the forward pass only: the gradient passes straight through.
@@ -105,6 +121,26 @@ class Model(nn.Module):
                 state = state + (rounded - state).detach()
             outputs.append(previous)
         return torch.stack(outputs, 1)
+
+
+def _sampling_grid(flow: torch.Tensor) -> torch.Tensor:
+    """Where `resample.warp` takes each sample from for `flow`, in the form `grid_sample` reads.
+
+    Made once per sequence, so that warping a frame's history is one call.
+    """
+    height, width = flow.shape[-2:]
+    ys = torch.arange(height, device=flow.device, dtype=flow.dtype)
+    xs = torch.arange(width, device=flow.device, dtype=flow.dtype)
+    grid_x = (xs[None, None, :] + flow[:, 0] + 0.5) / width * 2 - 1
+    grid_y = (ys[None, :, None] + flow[:, 1] + 0.5) / height * 2 - 1
+    return torch.stack([grid_x, grid_y], dim=-1)
+
+
+def _sample(image: torch.Tensor, grid: torch.Tensor) -> torch.Tensor:
+    """`image` brought along the motion `grid` was made from (as `resample.warp` does it)."""
+    return F.grid_sample(
+        image, grid.to(image.dtype), mode="bilinear", padding_mode="border", align_corners=False
+    )
 
 
 def _confidence(current: torch.Tensor, before: torch.Tensor) -> torch.Tensor:

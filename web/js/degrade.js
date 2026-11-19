@@ -79,7 +79,9 @@ export async function setUpDegrade(controls, note) {
     controls.codec.value = preset.bitsPerPixel === null ? 'none' : presetCodec;
     if (preset.bitsPerPixel !== null) controls.rate.value = `bpp:${preset.bitsPerPixel}`;
     controls.keyint.value = FIRST_KEY_ONLY;
-    controls.tellModel.checked = true;
+    // Off: an encoder's frame quantiser follows the moving foreground, and told it the model
+    // smooths and flickers a still background that was in fact coded well.
+    controls.tellModel.checked = false;
     showReadings();
   }
   controls.preset.addEventListener('change', applyPreset);
