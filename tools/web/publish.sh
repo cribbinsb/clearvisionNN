@@ -22,7 +22,7 @@ trap 'rm -rf "$site"' EXIT
 python3 tools/web/versioned.py "$site/page"
 # The build the published index names, if there is one, comes along.
 if git clone --quiet --depth 1 --branch gh-pages "$remote" "$site/published" 2>/dev/null; then
-  previous=$(grep -o '<base href="v/[0-9a-f]*/"' "$site/published/index.html" | grep -o 'v/[0-9a-f]*' || true)
+  previous=$(grep -o 'v/[0-9a-f]*' "$site/published/current.json" 2>/dev/null | head -n 1 || true)
   if [[ -n "$previous" && -d "$site/published/$previous" && ! -e "$site/page/$previous" ]]; then
     cp -r "$site/published/$previous" "$site/page/$previous"
   fi

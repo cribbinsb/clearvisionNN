@@ -26,6 +26,14 @@ export async function hasWebGpu() {
   return Boolean(await requestAdapter());
 }
 
+/** Resolves to the GPU the browser offers, in words, or null if it offers none: for the page's diagnostics. */
+export async function describeGpu() {
+  const adapter = await requestAdapter();
+  if (!adapter) return null;
+  const { vendor, architecture, description } = adapter.info ?? {};
+  return [vendor, architecture, description].filter(Boolean).join(' ') || 'unnamed adapter';
+}
+
 /** Resolves to a new device; rejects if the browser offers no adapter. */
 export async function requestDevice() {
   const adapter = await requestAdapter();

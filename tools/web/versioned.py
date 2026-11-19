@@ -5,7 +5,9 @@ A browser may go on using a file it fetched earlier; when only some files of a
 new version are fetched afresh, old and new code run together and fail. So the
 page's files are addressed under `v/<build id>/`, the id being a digest of
 everything under `web/`: a changed page is a set of URLs no browser has seen,
-and only `index.html`, which names the id, must never be reused.
+and only what names the id must never be reused. The development server sends
+that with caching forbidden; a published site cannot, so there the index is a
+small loader that never changes and asks for the current build's page afresh.
 
 The development server (serve.py) does this on the fly. For publishing, this
 script writes the same layout as files:
@@ -17,11 +19,15 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import shutil
 from pathlib import Path
 
 WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
 INDEX = "index.html"
+# The build's page as the loader fetches it, and the file that names the current build's.
+PAGE, CURRENT = "page.html", "current.json"
+LOADER = Path(__file__).resolve().parent / "loader.html"
 VERSIONS = "v"
 # Enough of the digest to tell builds apart.
 ID_LENGTH = 12
@@ -47,10 +53,19 @@ def versioned_index(root: Path = WEB_ROOT) -> str:
 
 
 def publish(output: Path, root: Path = WEB_ROOT) -> None:
-    """Write the page to `output`: the files under their build's path, and the index naming it."""
-    index = versioned_index(root)
-    shutil.copytree(root, output / VERSIONS / build_id(root))
-    (output / INDEX).write_text(index, encoding="utf-8")
+    """Write the page to `output`: its files under their build's path, and what leads there.
+
+    The index is a loader that never changes (loader.html); `current.json` names the build's
+    page, which sits under the build's path with everything else.
+    """
+    build = build_id(root)
+    page = versioned_index(root)
+    shutil.copytree(root, output / VERSIONS / build)
+    (output / VERSIONS / build / PAGE).write_text(page, encoding="utf-8")
+    (output / CURRENT).write_text(
+        json.dumps({"page": f"{VERSIONS}/{build}/{PAGE}"}) + "\n", encoding="utf-8"
+    )
+    shutil.copyfile(LOADER, output / INDEX)
 
 
 def main() -> None:

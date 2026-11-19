@@ -41,6 +41,8 @@ export function createStats(cells) {
       cells.bitrate.textContent = info.kbps === undefined ? '–' : `${info.kbps.toFixed(0)} kbit/s${target}`;
       cells.coding.textContent = describeCoding(info);
     },
+    /** Every step's time in one line, for reading out when the page is slow. */
+    summary: () => Object.entries(averages).map(([key, value]) => `${key} ${value.toFixed(1)}`).join(' · '),
     snapshot: () => ({ ...averages, ...lastInfo }),
     reset() {
       Object.keys(averages).forEach((key) => delete averages[key]);

@@ -5,6 +5,7 @@
 // model keeps its history while the pictures are examined.
 
 import { backendsFor, usableBackends } from './backends.js';
+import { describeGpu } from './gpu-device.js';
 import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS, FIRST_CLIP, clipUrl } from './clips.js';
 import { createController } from './controller.js';
 import { setUpDegrade } from './degrade.js';
@@ -23,12 +24,14 @@ const controls = {
 };
 // The codec's time has a cell id of its own: `codec` is the codec control.
 const statCells = () => ({ ...byId(['fps', 'upscalerFps', 'prepare', 'network', 'compute', 'wait', 'finish', 'degrade', 'bitrate', 'coding']), codec: element('codec-time') });
+const diagnostics = element('diagnostics');
 const status = element('status');
 const credit = element('credit');
 const view = createView(element('view'), controls.split);
 const stats = createStats(statCells());
 const host = createPipelineHost();
 
+let gpu = null; // the GPU the browser offers, in words
 let models = [];
 let backends = []; // those this browser can use
 let degrade = null;
@@ -78,6 +81,8 @@ const controller = createController({
     view.show(result);
     framesShown += 1;
     if (timed) stats.record({ ...result.timings, show: performance.now() - start }, result.info, asked);
+    // Everything needed to say why a slow page is slow, in one line that can be read out or copied.
+    if (timed) diagnostics.textContent = `${controls.backend.selectedOptions[0]?.text} · GPU: ${gpu ?? 'none offered'} · ms per frame: ${stats.summary()}`;
   },
   onState(state, detail) {
     // The transport follows the run: Pause while it moves, Resume and Step while it is held.
@@ -150,7 +155,7 @@ function offerModels() {
 }
 
 async function main() {
-  [models, backends] = await Promise.all([loadModels(), usableBackends()]);
+  [models, backends, gpu] = await Promise.all([loadModels(), usableBackends(), describeGpu()]);
   offerModels();
   fill(controls.source, [
     ...CLIPS.map((clip) => [`clip:${clip.id}`, clip.title]),
