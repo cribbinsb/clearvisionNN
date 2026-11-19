@@ -19,7 +19,7 @@ input it was given.
 
 | Model | Network | Parameters | Compute per input pixel |
 |---|---|---|---|
-| N | 16 channels × 6 layers | 20 k | about 17 k multiply-adds |
+| N | 16 channels × 6 layers | 23 k | about 17 k multiply-adds |
 | S | 24 channels × 10 layers | 69 k | about 65 k |
 | M | 32 channels × 15 layers | 169 k | about 160 k |
 | L | 40 channels × 15 layers | 259 k | about 250 k |
