@@ -130,6 +130,32 @@ tools/web/publish.sh            # build the page and publish it to the gh-pages 
 The crates depend on nanocodec by path, as a sibling checkout at the revision
 in `tools/nanocodec.rev`.
 
+## Use from Rust
+
+The Rust side is on crates.io. One crate gathers the rest:
+
+```toml
+clearvisionnn = { version = "0.1", features = ["models"] }
+```
+
+| Crate | What it holds | Licence |
+|---|---|---|
+| `clearvisionnn` | Re-exports the three below; `models` feature adds the weights | BSD-3-Clause |
+| `clearvisionnn-common` | Shared types | BSD-3-Clause |
+| `clearvisionnn-preproc` | The motion search and side planes in front of the network | BSD-3-Clause |
+| `clearvisionnn-runtime` | Everything around the network for a stream, and the 8-bit network itself | BSD-3-Clause |
+| `clearvisionnn-models` | The released 8-bit models, N to XL, built in | **CC BY-NC 4.0** |
+| `clearvisionnn-web` | The browser bindings the demo page uses | BSD-3-Clause |
+
+The weights are a crate of their own because their licence differs from the
+code's: some of the video they were trained on is for non-commercial use
+only. The `models` feature is therefore off by default, so that nobody takes
+on non-commercial data without asking for it. With it on,
+`clearvisionnn::models::Size::M.words()` gives a model ready for
+`clearvisionnn::runtime::integer::IntegerModel::from_words`; without it, load
+a model file of your own the same way (the files under `web/models`, or ones
+made with the recipe).
+
 ## Licence
 
 The code is under the BSD 3-Clause licence ([`LICENSE`](LICENSE)).

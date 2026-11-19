@@ -25,6 +25,7 @@ name = "clearvisionnn"
 version = "0.1.0"
 dependencies = [
  "clearvisionnn-common",
+ "clearvisionnn-models",
  "clearvisionnn-preproc",
  "clearvisionnn-runtime",
 ]
@@ -32,6 +33,13 @@ dependencies = [
 [[package]]
 name = "clearvisionnn-common"
 version = "0.1.0"
+
+[[package]]
+name = "clearvisionnn-models"
+version = "0.1.0"
+dependencies = [
+ "clearvisionnn-runtime",
+]
 
 [[package]]
 name = "clearvisionnn-preproc"

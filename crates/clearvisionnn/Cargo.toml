@@ -16,6 +16,12 @@ categories.workspace = true
 cvnn-common.workspace = true
 cvnn-preproc.workspace = true
 cvnn-runtime.workspace = true
+cvnn-models = { workspace = true, optional = true }
+
+[features]
+# The released 8-bit models, built in. Off by default: they are licensed for
+# non-commercial use (CC BY-NC 4.0), unlike the code.
+models = ["dep:cvnn-models"]
 
 [lints]
 workspace = true

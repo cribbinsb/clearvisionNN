@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # Dependency order: each crate after everything it depends on.
-CRATES=(clearvisionnn-common clearvisionnn-preproc clearvisionnn-runtime clearvisionNN clearvisionnn-web)
+CRATES=(clearvisionnn-common clearvisionnn-preproc clearvisionnn-runtime clearvisionnn-models clearvisionNN clearvisionnn-web)
 INDEX=https://index.crates.io
 # Seconds to wait for a published crate to appear in the index.
 INDEX_TIMEOUT=600

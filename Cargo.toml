@@ -8,6 +8,7 @@ members = [
     "crates/cvnn-runtime",
     "crates/cvnn-py",
     "crates/cvnn-web",
+    "crates/cvnn-models",
     "crates/clearvisionnn",
 ]
 
@@ -28,6 +29,7 @@ categories = ["multimedia::video", "computer-vision"]
 cvnn-common = { package = "clearvisionnn-common", version = "0.1.0", path = "crates/cvnn-common" }
 cvnn-preproc = { package = "clearvisionnn-preproc", version = "0.1.0", path = "crates/cvnn-preproc" }
 cvnn-runtime = { package = "clearvisionnn-runtime", version = "0.1.0", path = "crates/cvnn-runtime" }
+cvnn-models = { package = "clearvisionnn-models", version = "0.1.0", path = "crates/cvnn-models" }
 # nanocodec's analysis, as published; the workspace builds it from a sibling
 # checkout (../nanocodec), see docs/PROCEDURES.md.
 nc-common = { package = "nanocodec-common", version = "0.4.0", path = "../nanocodec/crates/nc-common" }

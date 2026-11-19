@@ -10,11 +10,18 @@ under one name:
   warp, blend, colour), and the reference implementation of the 8-bit integer
   network, so a model in that form runs without any other inference engine.
 
+With the `models` feature, `clearvisionnn::models` holds the released 8-bit
+models, N to XL, ready to load:
+
+```toml
+clearvisionnn = { version = "0.1", features = ["models"] }
+```
+
 - Repository, training recipe and models: <https://github.com/cribbinsb/clearvisionNN>
 - Live demo (WebGPU): <https://cribbinsb.github.io/clearvisionNN/>
 
 ## Licence
 
-BSD-3-Clause (`LICENSE` in the repository). The crates contain no model
-weights. The models in the repository are licensed separately, for
-non-commercial use (`web/models/LICENSE.md` there).
+BSD-3-Clause (`LICENSE` in the repository) for the code. The `models`
+feature is off by default because the weights it adds
+(`clearvisionnn-models`) are under CC BY-NC 4.0, for non-commercial use.

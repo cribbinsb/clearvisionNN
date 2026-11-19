@@ -1,0 +1,24 @@
+[package]
+name = "clearvisionnn-models"
+description = "The released 8-bit models of clearvisionNN, for non-commercial use"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# Not the workspace's licence: some of the video these weights were trained on
+# is licensed for non-commercial use only (README.md).
+license = "CC-BY-NC-4.0"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/clearvisionnn-models"
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "cvnn_models"
+
+[dev-dependencies]
+cvnn-runtime.workspace = true
+
+[lints]
+workspace = true
