@@ -16,6 +16,7 @@ const LONGEST_KEY_INTERVAL = 30 * FRAME_RATE;
 const STARTING_QUANTISER = 32;
 // The encoder's rate buffer, as the training encodes had: one second at the target rate.
 const RATE_BUFFER_MS = 1000;
+const MICROSECONDS_PER_MS = 1000;
 
 let loading = null;
 
@@ -64,7 +65,10 @@ export async function createNanocodec(codec, width, height, rate, keyInterval) {
      */
     push(picture, index) {
       source.from_planes(picture, 'I420', COLOUR, width, height, layout);
-      const packet = encoder.encode(source);
+      // The frame is coded as captured now: when the page cannot keep up with the source and frames
+      // are missed, rate control gives this one the bits of the time since the last, as a live
+      // sender's does. Coded as one of an unbroken 30 a second it would be starved and go blocky.
+      const packet = encoder.encode_at(source, Math.round(performance.now() * MICROSECONDS_PER_MS));
       // An empty packet repeats the previous picture: that is what a receiver shows.
       if (!encoder.repeat) {
         decoder.decode(packet);

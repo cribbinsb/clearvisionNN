@@ -11,7 +11,7 @@ const NOISE_SEED = 1; // fixed, so a run can be repeated exactly
 // How long to wait for a frame's decoded picture before moving on; an encoder
 // that holds a frame back delivers it while the next one is being sent.
 const DECODE_WAIT_MS = 100;
-const RATE_WINDOW = FRAME_RATE; // frames the measured bitrate is averaged over
+const RATE_WINDOW = FRAME_RATE; // coded frames the measured bitrate is taken over
 
 /**
  * Resolves to a sender for `width` x `height` originals under `degrade` (see
@@ -33,7 +33,7 @@ export async function createSender(width, height, degrade) {
     throw error;
   }
   const waiting = []; // originals whose decoded frame has not arrived, oldest first
-  const sizes = [];
+  const packets = []; // { bytes, time } of the newest coded frames, oldest first
   let index = 0;
   return {
     async send(original) {
@@ -53,9 +53,11 @@ export async function createSender(width, height, degrade) {
         dropped += 1;
       }
       const entry = waiting.shift();
-      sizes.push(decoded.bytes);
-      if (sizes.length > RATE_WINDOW) sizes.shift();
-      const bits = sizes.reduce((sum, bytes) => sum + 8 * bytes, 0);
+      packets.push({ bytes: decoded.bytes, time: entry.sent });
+      if (packets.length > RATE_WINDOW) packets.shift();
+      // The rate in real time: the bits sent after the window's first frame, over the time they took.
+      const bits = packets.slice(1).reduce((sum, packet) => sum + 8 * packet.bytes, 0);
+      const seconds = (entry.sent - packets[0].time) / 1000;
       const { quantiser } = decoded;
       const told = degrade.tellModel && quantiser !== null;
       return {
@@ -66,7 +68,7 @@ export async function createSender(width, height, degrade) {
         // A decoder knows the quantiser only where the codec reports it; the page may withhold it.
         coding: told ? { quantiser, key: decoded.key } : null,
         timings: { degrade: entry.degrade, codec: performance.now() - entry.sent },
-        info: { key: decoded.key, quantiser, told, kbps: (bits * FRAME_RATE) / sizes.length / 1000 },
+        info: { key: decoded.key, quantiser, told, kbps: seconds > 0 ? bits / seconds / 1000 : undefined },
       };
     },
     release() {
