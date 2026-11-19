@@ -7,9 +7,10 @@ import { createPipeline } from './frame-pipeline.js';
 /** Answer `scope`'s messages: `open` a pipeline, pass it each `frame`, `release` it. */
 function serve(scope) {
   let pipeline = null;
+  const remembered = new Map(); // what an upscaler learnt about this device, kept between pipelines
   const handlers = {
     async open({ model, backendId, width, height, degrade, tuning }) {
-      pipeline = await createPipeline(model, backendId, width, height, degrade, tuning);
+      pipeline = await createPipeline(model, backendId, width, height, degrade, { ...tuning, remembered });
     },
     frame: ({ picture, time }) => pipeline.process(picture, time),
     async release() {

@@ -12,6 +12,14 @@
 // in under a third of the time a storage array takes on an NVIDIA GPU
 // (measured; uniform reads are far cheaper there). The four outputs' weights
 // of a word are one vec4 either way, so one read fetches them together.
+//
+// The products themselves can be formed two ways. Packed 8-bit dot products
+// are what GPUs with hardware for them (NVIDIA, AMD, Intel) run fastest. An
+// Apple GPU has none and runs integer arithmetic slowly: there the products
+// are formed in 32-bit float, about sixteen times faster (measured on an M5),
+// and exactly: a layer's sum of products stays below 2^24, up to which every
+// whole number is a float (`FLOAT_EXACT_TERMS`). The weights are then a 4x4
+// float matrix per input word and group of four outputs.
 
 export const GROUP_SIDE = 8; // workgroup side, in pixels
 const TAPS = 9;
@@ -53,40 +61,60 @@ fn dots(x: u32, w: vec4<u32>) -> vec4<i32> {
 
 const range = (count) => [...Array(count).keys()];
 
-/** The weights of a layer with `vectors` vec4s of them: a uniform array where that fits, else a storage one. */
-const weightsBinding = (vectors, uniform) => (uniform
-  ? `@group(0) @binding(2) var<uniform> wts: array<vec4<u32>, ${vectors}>;`
-  : '@group(0) @binding(2) var<storage, read> wts: array<vec4<u32>>;');
+// The most products a float accumulator may sum and stay exact: each is at most 128 * 128, and
+// whole numbers are exact in a 32-bit float up to 2^24.
+export const FLOAT_EXACT_TERMS = Math.floor(2 ** 24 / (128 * 128));
+
+/**
+ * The weights of a layer with `vectors` groups of them (a vec4 of packed words, or a 4x4 float
+ * matrix): a uniform array where that fits, else a storage one.
+ */
+function weightsBinding(vectors, uniform, float) {
+  const element = float ? 'mat4x4<f32>' : 'vec4<u32>';
+  return uniform
+    ? `@group(0) @binding(2) var<uniform> wts: array<${element}, ${vectors}>;`
+    : `@group(0) @binding(2) var<storage, read> wts: array<${element}>;`;
+}
+
+/** How a tap's products are added up: in packed integers, or (`float`) in exact 32-bit float. */
+function products(float) {
+  return float
+    ? { zero: 'vec4<f32>(0.0)', word: (read) => `vec4<f32>(unpack8(${read}))`, add: (sum, k) => `${sum}${k} += wts[w + ${k}] * x;`, whole: (name) => `vec4<i32>(${name})` }
+    : { zero: 'vec4<i32>(0)', word: (read) => read, add: (sum, k) => `${sum}${k} += dots(x, wts[w + ${k}]);`, whole: (name) => name };
+}
 
 /** The taps of the stem: input words read from the frame, unsigned and signed planes summed apart. */
-function stemTaps(shape) {
+function stemTaps(shape, float) {
   const outputs = range(shape.trunkWords);
+  const form = products(float);
   const words = range(shape.inputWords).map((word) => {
     const unsigned = word < shape.unsignedWords;
     const sum = unsigned ? 'u' : 's';
-    return `{ let x = select(${unsigned ? PAD_UNSIGNED : PAD_SIGNED}, src[b + ${word}], ok); let w = (t * ${shape.inputWords} + ${word}) * ${shape.trunkWords};
-      ${outputs.map((k) => `${sum}${k} += dots(x, wts[w + ${k}]);`).join('\n      ')} }`;
+    return `{ let x = ${form.word(`select(${unsigned ? PAD_UNSIGNED : PAD_SIGNED}, src[b + ${word}], ok)`)}; let w = (t * ${shape.inputWords} + ${word}) * ${shape.trunkWords};
+      ${outputs.map((k) => form.add(sum, k)).join('\n      ')} }`;
   });
   return {
-    declare: outputs.map((k) => `var u${k} = vec4<i32>(0); var s${k} = vec4<i32>(0);`).join(' '),
+    declare: outputs.map((k) => `var u${k} = ${form.zero}; var s${k} = ${form.zero};`).join(' '),
     index: `(gg.y * p.frame.x + gg.x) * ${shape.inputWords}`,
     valid: 'all(gg >= vec2<i32>(0)) && all(gg < p.frame)',
     body: words.join('\n    '),
-    accumulators: outputs.map((k) => `let a${k} = par[${k}] + ${shape.stemGains[0]} * u${k} + ${shape.stemGains[1]} * s${k};`).join('\n  '),
+    accumulators: outputs.map((k) => `let a${k} = par[${k}] + ${shape.stemGains[0]} * ${form.whole(`u${k}`)} + ${shape.stemGains[1]} * ${form.whole(`s${k}`)};`).join('\n  '),
   };
 }
 
 /** The taps of a layer reading a tile's activations; beyond the region the layer below computed lie zeros. */
-function trunkTaps(shape, outputWords) {
+function trunkTaps(shape, outputWords, float) {
   const outputs = range(outputWords);
-  const words = range(shape.trunkWords).map((word) => `{ let x = select(${PAD_UNSIGNED}, src[b + ${word}], ok); let w = (t * ${shape.trunkWords} + ${word}) * ${outputWords};
-      ${outputs.map((k) => `a${k} += dots(x, wts[w + ${k}]);`).join('\n      ')} }`);
+  const form = products(float);
+  const words = range(shape.trunkWords).map((word) => `{ let x = ${form.word(`select(${PAD_UNSIGNED}, src[b + ${word}], ok)`)}; let w = (t * ${shape.trunkWords} + ${word}) * ${outputWords};
+      ${outputs.map((k) => form.add('q', k)).join('\n      ')} }`);
   return {
-    declare: outputs.map((k) => `var a${k} = par[${k}];`).join(' '),
+    declare: outputs.map((k) => `var q${k} = ${form.zero};`).join(' '),
     index: `(base + (l.y + d.y) * p.window.x + l.x + d.x) * ${shape.trunkWords}`,
     valid: 'all(gg >= vec2<i32>(0)) && all(gg < p.frame) && all(c + d >= vec2<i32>(-p.reachBelow)) && all(c + d < p.tile + p.reachBelow)',
     body: words.join('\n    '),
-    accumulators: '',
+    // The bias joins the sum of products afterwards: it may be larger than a float holds exactly.
+    accumulators: outputs.map((k) => `let a${k} = par[${k}] + ${form.whole(`q${k}`)};`).join('\n  '),
   };
 }
 
@@ -118,19 +146,21 @@ function writes(kind, shape) {
  * The compute shader of one kind of layer: 'stem', 'body', 'last' (the final
  * block, which also adds the long skip) or 'head'. `shape` is the model's
  * word counts (int8-model.js); `packedDot` says whether the packed built-ins
- * exist, `uniformWeights` whether the weights are bound as a uniform buffer.
+ * exist, `uniformWeights` whether the weights are bound as a uniform buffer,
+ * `floatProducts` whether the products are formed in float (the weights are
+ * then `floatWeights` of the model's).
  */
-export function layerShader(kind, shape, packedDot, uniformWeights) {
+export function layerShader(kind, shape, packedDot, uniformWeights, floatProducts = false) {
   const inputWords = kind === 'stem' ? shape.inputWords : shape.trunkWords;
   const outputWords = kind === 'head' ? 1 + shape.stateWords : shape.trunkWords;
-  const taps = kind === 'stem' ? stemTaps(shape) : trunkTaps(shape, outputWords);
+  const taps = kind === 'stem' ? stemTaps(shape, floatProducts) : trunkTaps(shape, outputWords, floatProducts);
   const bounded = kind === 'head' && shape.stateWords
     ? `@group(0) @binding(5) var<storage, read> tanhTable: array<u32>;
 fn bounded(magnitude: i32) -> i32 { return i32((tanhTable[magnitude >> 2u] >> (u32(magnitude & 3) * 8u)) & 255u); }` : '';
   return `
 @group(0) @binding(0) var<storage, read> src: array<u32>;
 @group(0) @binding(1) var<storage, read_write> dst: array<u32>;
-${weightsBinding(TAPS * inputWords * outputWords, uniformWeights)}
+${weightsBinding(TAPS * inputWords * outputWords, uniformWeights, floatProducts)}
 @group(0) @binding(3) var<storage, read> par: array<vec4<i32>>;
 ${kind === 'last' ? '@group(0) @binding(4) var<storage, read> stem: array<u32>;' : ''}
 ${bounded}
@@ -157,4 +187,27 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   ${taps.accumulators}
   ${writes(kind, shape)}
 }`;
+}
+
+const BYTES_PER_WORD = 4;
+const MATRIX_ELEMENTS = 16;
+
+/**
+ * A layer's packed weights (four words to a group: one per output, a signed byte per input
+ * channel) as the 4x4 float matrices the float shaders multiply an input word by: column j,
+ * row i is the weight of input channel j for output i.
+ */
+export function floatWeights(packed) {
+  const words = new Uint32Array(packed.buffer, packed.byteOffset, packed.byteLength / BYTES_PER_WORD);
+  const matrices = new Float32Array((words.length / BYTES_PER_WORD) * MATRIX_ELEMENTS);
+  for (let group = 0; group < words.length / BYTES_PER_WORD; group += 1) {
+    for (let output = 0; output < BYTES_PER_WORD; output += 1) {
+      const word = words[group * BYTES_PER_WORD + output];
+      for (let input = 0; input < BYTES_PER_WORD; input += 1) {
+        // A signed byte: shifted to the top of the word and back down.
+        matrices[group * MATRIX_ELEMENTS + input * BYTES_PER_WORD + output] = (word << (24 - 8 * input)) >> 24;
+      }
+    }
+  }
+  return matrices;
 }

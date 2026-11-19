@@ -39,8 +39,14 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
     for (const group of groupCandidates(network.tiles)) variants.push({ tile, group, network, packedDot: network.packedDot });
     const speltOut = createInt8Network(device, model, width, height, { tile, packedDot: false });
     variants.push({ tile, group: speltOut.tiles, network: speltOut, packedDot: false });
+    // The float form of the products (what an Apple GPU runs) must give the same words, with the
+    // weights bound either way.
+    for (const uniformWeights of [true, false]) {
+      const float = createInt8Network(device, model, width, height, { tile, floatProducts: true, uniformWeights });
+      variants.push({ tile, group: float.tiles, network: float, packedDot: float.packedDot, float: uniformWeights ? 'uniform' : 'storage' });
+    }
   }
-  const results = variants.map(({ tile, group, packedDot }) => ({ tile, group, packedDot, differingWords: 0, times: [] }));
+  const results = variants.map(({ tile, group, packedDot, float }) => ({ tile, group, packedDot, float, differingWords: 0, times: [] }));
   let distinct = 0;
   for (let frame = 0; frame < frames; frame += 1) {
     const sent = await camera.capture((await source.grab()).picture);

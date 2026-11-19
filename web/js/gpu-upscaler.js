@@ -14,23 +14,22 @@ const BLOCK = 8; // side of a motion block, in input samples
 const UNKNOWN_QUANTISER = -1; // what the WebAssembly side takes for "coding not known"
 const TRIAL_FRAMES = 3; // frames each way of writing the shaders is timed on, the first not counted
 const TRIAL_GIVE_UP = 3; // a way this many times slower than the best so far is dropped at once
+const FIRST_FRAME_GIVE_UP = 5; // and one whose very first frame is this many times too slow, after that frame
 // The network's GPU time above which the page's own shaders are not worth running: a float model
 // on the browser's WebGPU would be quicker. Some GPUs take seconds where others take a millisecond.
 const TOO_SLOW_MS = 100;
-// A first way this far gone leaves no hope for the others, which differ from it only in detail.
-const HOPELESS_MS = 10 * TOO_SLOW_MS;
 /** What `error.code` is when the shaders work but are too slow to use (app.js then tries a float model). */
 export const SLOW_GPU = 'slow-gpu';
 
-/** The ways the network's shaders can be written (int8-network.js), each with a name for the diagnostics. */
-function variants() {
-  const weights = [['uniform weights', {}], ['storage weights', { uniformWeights: false }]];
-  // Without the packed dot-product built-ins there is only the one way to form the products.
-  const packed = navigator.gpu.wgslLanguageFeatures?.has('packed_4x8_integer_dot_product') ?? false;
-  const products = packed ? [['packed products', {}], ['plain products', { packedDot: false }]] : [['plain products', {}]];
-  return weights.flatMap(([weightsName, weightsOptions]) => products.map(([productsName, productsOptions]) => (
-    { name: `${weightsName}, ${productsName}`, options: { ...weightsOptions, ...productsOptions } })));
-}
+/**
+ * The ways the network's products can be formed (int8-shaders.js), each with a name for the
+ * diagnostics: in packed integers, quickest where the GPU has hardware for them, and in exact
+ * float, far quicker where it has not (an Apple GPU).
+ */
+const VARIANTS = [
+  { name: 'integer products', options: {} },
+  { name: 'float products', options: { floatProducts: true } },
+];
 
 /** The model file's words, refused unless the reference implementation accepts the file. */
 async function loadWords(model) {
@@ -43,14 +42,17 @@ async function loadWords(model) {
  * An upscaler (see upscaler.js) for `model`, an integer export, and `width` x
  * `height` input frames. `options` are int8-network.js's, for checks, and
  * `tooSlowMs`, the GPU time a frame above which the upscaler refuses to start
- * (its error has the code `SLOW_GPU`).
+ * (its error has the code `SLOW_GPU`), and `remembered`, a Map kept by the
+ * caller in which the quickest way found for a model and size is kept, so
+ * that only the first start on a device pays for the trial.
  */
-export async function createGpuUpscaler(model, width, height, { tooSlowMs = TOO_SLOW_MS, ...options } = {}) {
+export async function createGpuUpscaler(model, width, height, { tooSlowMs = TOO_SLOW_MS, remembered = new Map(), ...options } = {}) {
   const parsed = parseIntegerModel(await loadWords(model));
   const search = new MotionSearch(width, height);
   const pixels = width * height;
   const vectors = new Int32Array(2 * Math.ceil(width / BLOCK) * Math.ceil(height / BLOCK));
   const blank = new Uint8Array((pixels * 3) / 2); // a frame for the trials
+  const memory = `${model.directory} ${width}x${height}`; // what a trial's outcome is remembered under
   const canvases = [0, 1].map(() => new OffscreenCanvas(2 * width, 2 * height));
   let gpu = null; // { device, runtime, schedule, lost }
   let stored = false; // whether the GPU holds the previous frame's output and state
@@ -64,10 +66,12 @@ export async function createGpuUpscaler(model, width, height, { tooSlowMs = TOO_
     for (let frame = 0; frame < TRIAL_FRAMES; frame += 1) {
       const submitted = performance.now();
       const computing = await runtime.submit(blank, vectors, false, levels, group);
-      // The first frame also compiles the shaders, so it is not counted.
-      if (frame > 0) quickest = Math.min(quickest, computing ?? performance.now() - submitted);
-      // A variant already far behind is not worth more frames: on some GPUs one takes seconds.
-      if (frame > 0 && (quickest > TRIAL_GIVE_UP * limit || quickest > tooSlowMs)) break;
+      const took = computing ?? performance.now() - submitted;
+      // The first frame may also finish compiling the shaders, so it is not counted, unless it is
+      // so slow that the way is already out of the running: on some GPUs one takes seconds.
+      if (frame === 0 && took > FIRST_FRAME_GIVE_UP * Math.min(limit, tooSlowMs)) return took;
+      if (frame > 0) quickest = Math.min(quickest, took);
+      if (frame > 0 && quickest > TRIAL_GIVE_UP * limit) break;
     }
     return quickest;
   }
@@ -81,7 +85,10 @@ export async function createGpuUpscaler(model, width, height, { tooSlowMs = TOO_
   async function quickestRuntime(device) {
     if (Object.keys(options).length) return { runtime: createGpuRuntime(device, parsed, model, width, height, canvases, options), variant: 'as asked' };
     let best = null; // { runtime, variant, time }
-    for (const variant of variants()) {
+    // What was found quickest for this model and size before is used again without a trial.
+    const known = remembered.get(memory);
+    if (known) return { runtime: createGpuRuntime(device, parsed, model, width, height, canvases, known.options), variant: known.variant };
+    for (const variant of VARIANTS) {
       let runtime;
       try {
         runtime = createGpuRuntime(device, parsed, model, width, height, canvases, variant.options);
@@ -89,15 +96,11 @@ export async function createGpuUpscaler(model, width, height, { tooSlowMs = TOO_
         continue; // a way this device cannot build is simply not a candidate
       }
       const time = await trial(runtime, best?.time ?? Infinity);
-      if (!best && time > HOPELESS_MS) {
-        best = { runtime, variant: variant.name, time };
-        break;
-      }
       if (best && time >= best.time) {
         runtime.destroy();
       } else {
         best?.runtime.destroy();
-        best = { runtime, variant: `${variant.name}, ${time.toFixed(1)} ms`, time };
+        best = { runtime, variant: `${variant.name}, ${time.toFixed(1)} ms`, time, options: variant.options };
       }
     }
     if (!best) throw new Error('This GPU could not build the network\'s shaders.');
@@ -107,6 +110,7 @@ export async function createGpuUpscaler(model, width, height, { tooSlowMs = TOO_
       slow.code = SLOW_GPU;
       throw slow;
     }
+    remembered.set(memory, { options: best.options, variant: best.variant });
     return best;
   }
 

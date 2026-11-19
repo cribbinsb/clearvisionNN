@@ -36,12 +36,14 @@ const host = createPipelineHost();
 let gpu = null; // the GPU the browser offers, in words
 // Switches for finding out why a device is slow, from the address: `?weights=storage` binds the
 // 8-bit network's weights the slower, more widely proven way; `?packed=0` avoids the packed
-// dot-product built-ins; `?tile=<n>` sets the tile size; `?tooslow=<ms>` sets the GPU time above
+// dot-product built-ins; `?products=float` (or `integer`) fixes how the products are formed;
+// `?tile=<n>` sets the tile size; `?tooslow=<ms>` sets the GPU time above
 // which the 8-bit shaders are given up for a float model.
 const address = new URLSearchParams(location.search);
 const tuning = {
   ...(address.get('weights') === 'storage' && { uniformWeights: false }),
   ...(address.get('packed') === '0' && { packedDot: false }),
+  ...(address.has('products') && { floatProducts: address.get('products') === 'float' }),
   ...(address.has('tile') && { tile: Number(address.get('tile')) }),
   ...(address.has('tooslow') && { tooSlowMs: Number(address.get('tooslow')) }),
 };
