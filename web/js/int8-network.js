@@ -3,14 +3,11 @@
 // before the next, so a group's activations are all that is live at once;
 // the group size changes only the order of the work, never its result.
 
-import { FLOAT_EXACT_TERMS, GROUP_SIDE, floatWeights, layerShader } from './int8-shaders.js';
+import { GROUP_SIDE, floatWeights, layerShader } from './int8-shaders.js';
 
 const UNIFORM_STEP = 256; // bytes between parameter blocks: the alignment uniform offsets need
 const PARAMS_BYTES = 48;
 const WORD_BYTES = 4;
-const TAPS = 9; // of a 3x3 convolution
-const WORD_CHANNELS = 4; // channels packed to a word
-const FLOAT_GROWTH = 4; // a weight as a float is four times its byte
 
 const hasPackedDot = () => navigator.gpu.wgslLanguageFeatures?.has('packed_4x8_integer_dot_product') ?? false;
 const kindOf = (layer, layers) => (layer === 0 ? 'stem' : layer === layers - 1 ? 'head' : layer === layers - 2 ? 'last' : 'body');
@@ -23,16 +20,18 @@ const kindOf = (layer, layers) => (layer === 0 ? 'stem' : layer === layers - 1 ?
  * for checking and timing: `tile` overrides the model's tile side (0: the
  * whole frame as one tile, with no halo), `haloOverride` its halo,
  * `packedDot: false` uses the spelt-out arithmetic even where the packed
- * built-ins exist, and `uniformWeights: false` binds the weights as storage
- * even where they fit a uniform binding.
+ * built-ins exist, `uniformWeights: false` binds the weights as storage
+ * even where they fit a uniform binding, `floatProducts: true` forms the
+ * products in floating point, and `span` is the pixels of a row each
+ * invocation computes (int8-shaders.js says what these are for). None of
+ * them changes a result.
  */
 export function createInt8Network(device, model, width, height, options = {}) {
-  const { tile = model.tile, haloOverride = model.halo, packedDot = hasPackedDot(), floatProducts = false } = options;
-  // A float sum is exact only so far (int8-shaders.js); a wider layer than that keeps to integers.
-  const float = floatProducts && TAPS * WORD_CHANNELS * Math.max(model.inputWords, model.trunkWords) <= FLOAT_EXACT_TERMS;
+  const { tile = model.tile, haloOverride = model.halo, packedDot = hasPackedDot(), floatProducts = false, span = 1 } = options;
   const layers = model.layers.length;
   // One choice for the whole model, so that a kind of layer has one shader.
-  const largestWeights = Math.max(...model.layers.map((layer) => layer.weights.byteLength)) * (float ? FLOAT_GROWTH : 1);
+  const asBound = (packed) => (floatProducts ? floatWeights(packed) : packed);
+  const largestWeights = Math.max(...model.layers.map((layer) => asBound(layer.weights).byteLength));
   const uniformWeights = options.uniformWeights ?? largestWeights <= device.limits.maxUniformBufferBindingSize;
   const halo = tile ? haloOverride : 0;
   const size = tile ? [tile, tile] : [width, height];
@@ -51,7 +50,7 @@ export function createInt8Network(device, model, width, height, options = {}) {
     device.queue.writeBuffer(made, 0, data);
     return made;
   };
-  const weights = (data) => filled(float ? floatWeights(data) : data, uniformWeights ? GPUBufferUsage.UNIFORM : GPUBufferUsage.STORAGE);
+  const weights = (packed) => filled(asBound(packed), uniformWeights ? GPUBufferUsage.UNIFORM : GPUBufferUsage.STORAGE);
   const pixels = width * height;
   const input = storage(pixels * model.inputWords * WORD_BYTES);
   const output = storage(pixels * model.outputWords * WORD_BYTES);
@@ -61,7 +60,7 @@ export function createInt8Network(device, model, width, height, options = {}) {
   const tanh = model.stateWords ? filled(model.tanh) : null;
   const pipelines = {};
   for (const kind of ['stem', 'body', 'last', 'head']) {
-    const module = device.createShaderModule({ code: layerShader(kind, model, packedDot, uniformWeights, float) });
+    const module = device.createShaderModule({ code: layerShader(kind, model, { packedDot, uniformWeights, floatProducts, span }) });
     pipelines[kind] = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } });
   }
   // scratch[0] keeps the stem's output for the long skip; the body alternates between the other two.
@@ -108,7 +107,7 @@ export function createInt8Network(device, model, width, height, options = {}) {
         pass.setPipeline(pipelines[kindOf(layer, layers)]);
         pass.setBindGroup(0, layerGroups[layer]);
         pass.setBindGroup(1, parameters);
-        pass.dispatchWorkgroups(Math.ceil(window[0] / GROUP_SIDE), Math.ceil(window[1] / GROUP_SIDE), depth);
+        pass.dispatchWorkgroups(Math.ceil(window[0] / (GROUP_SIDE * span)), Math.ceil(window[1] / GROUP_SIDE), depth);
       });
     });
   }

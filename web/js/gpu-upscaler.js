@@ -17,6 +17,7 @@ const UNKNOWN_QUANTISER = -1; // what the WebAssembly side takes for "coding not
 // an Apple M5 (measured there). The choice is by maker, not by timing: one frame of the wrong
 // form takes seconds on such a GPU.
 const FLOAT_PRODUCT_VENDORS = ['apple'];
+const FLOAT_SPAN = 4; // pixels of a row an invocation computes there: twice as quick again on an M5
 
 /** The model file's words, refused unless the reference implementation accepts the file. */
 async function loadWords(model) {
@@ -42,10 +43,13 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
 
   async function start() {
     const device = await requestDevice();
-    const floatProducts = options.floatProducts ?? FLOAT_PRODUCT_VENDORS.includes(device.adapterInfo?.vendor);
+    const slowIntegers = FLOAT_PRODUCT_VENDORS.includes(device.adapterInfo?.vendor);
+    const floatProducts = options.floatProducts ?? slowIntegers;
+    // With float products, several pixels to an invocation: each weight read then serves them all.
+    const span = options.span ?? (floatProducts ? FLOAT_SPAN : 1);
     try {
-      const runtime = createGpuRuntime(device, parsed, model, width, height, canvases, { ...options, floatProducts });
-      const variant = floatProducts ? 'float products' : 'integer products';
+      const runtime = createGpuRuntime(device, parsed, model, width, height, canvases, { ...options, floatProducts, span });
+      const variant = `${floatProducts ? 'float' : 'integer'} products, ${span} to an invocation`;
       const started = { device, runtime, variant, schedule: createSchedule(groupCandidates(runtime.tiles)), lost: false };
       device.lost.then(() => { started.lost = true; });
       return started;
