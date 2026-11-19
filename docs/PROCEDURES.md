@@ -88,6 +88,8 @@ cargo run --release -p cvnn-runtime --example timing [width height]   # time eac
 - `tools/web/publish.sh` builds both modules and publishes the page to
   GitHub Pages as the single commit of the `gh-pages` branch, every file but
   `index.html` under a path named for the build (`tools/web/versioned.py`).
+  The build published before is kept beside the new one, so an open page
+  keeps working until it is reloaded.
   Models under `web/models` are committed.
 - `clearvisionnn export ... --half` writes a half-precision (fp16) graph. On WebGPU
   it needs the `shader-f16` feature, which Chrome withholds on NVIDIA Vulkan
