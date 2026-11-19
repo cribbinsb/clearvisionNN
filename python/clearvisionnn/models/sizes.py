@@ -21,6 +21,8 @@ class NetSize:
 
 
 SIZES: dict[str, NetSize] = {
+    # The smallest: for devices where the next rung up cannot keep pace.
+    "n": NetSize(8, 4, 16, 4, 32, 6, 16),
     "s": NetSize(16, 8, 32, 8, 64, 10, 24),
     "m": NetSize(16, 12, 48, 8, 96, 15, 32),
     "l": NetSize(24, 8, 64, 8, 128, 15, 40),

@@ -14,8 +14,10 @@ const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 async function requestAdapter() {
   if (!('gpu' in navigator)) return null;
   for (let attempt = 0; attempt < ADAPTER_ATTEMPTS; attempt += 1) {
-    // On a machine with two GPUs the default may be the slower, integrated one.
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    // The browser's own choice of GPU, never a preference for the fast one: on a laptop with two,
+    // Chrome draws the page on the integrated GPU, and pictures drawn by WebGPU on the other one
+    // fail to cross over and show as black.
+    const adapter = await navigator.gpu.requestAdapter();
     if (adapter) return adapter;
     await pause(ATTEMPT_INTERVAL_MS);
   }

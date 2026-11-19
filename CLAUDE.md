@@ -63,13 +63,18 @@ Planned, not yet built: `cvnn-cli` (native upscaler).
   Rust** (`cvnn-runtime`): everything around the network at run time and, for a
   model in integer form, the network too (`docs/INTEGER.md`). A second
   implementation is allowed only where the reference cannot run (the GPU),
-  holds no arithmetic the reference lacks, and is held to it bit for bit by a
-  documented check on real frames (`tools/web/int8_check.py` for the network,
-  `tools/web/runtime_check.py` for the whole frame). The float runtime must
-  match `models/` exactly: `python/tests/test_runtime_parity.py` checks every
-  model variant frame for frame, and must be extended with each new one. The
-  integer runtime replaces its float steps with fixed-point ones, and is held
-  to it within the tolerance `python/tests/test_integer_runtime.py` tests.
+  and there speed comes first: the shaders may take whatever form a GPU runs
+  fastest. A form that computes the reference's arithmetic exactly is held to
+  it bit for bit. A form that only approximates it is allowed where it is
+  much faster; `docs/INTEGER.md` then says what it computes and how far that
+  measured from the reference, and it is held to a stated tolerance. Both by
+  documented checks on real frames (`tools/web/int8_check.py` for the
+  network, `tools/web/runtime_check.py` for the whole frame). The float
+  runtime must match `models/` exactly: `python/tests/test_runtime_parity.py`
+  checks every model variant frame for frame, and must be extended with each
+  new one. The integer runtime replaces its float steps with fixed-point
+  ones, and is held to it within the tolerance
+  `python/tests/test_integer_runtime.py` tests.
 - **Bindings hold no logic.** `cvnn-py` and `cvnn-web` only convert types.
 - **One model definition.** Networks are defined once in `models/`; exports are
   generated from it. Layout-independent parts live in `trunk.py`.

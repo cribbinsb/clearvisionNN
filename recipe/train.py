@@ -34,7 +34,7 @@ from recipe.sources import OUT, add_source_arguments, sources_from
 
 SEED = 0
 # The published sizes, as rungs of the package's size ladder (channels x blocks of its flat layout).
-PUBLISHED_SIZES = ("s", "m", "l", "xl")
+PUBLISHED_SIZES = ("n", "s", "m", "l", "xl")
 # Upper limit of the base run; the plateau rule ends it sooner.
 BASE_STEPS = 45000
 SHARPEN_STEPS = 1500
