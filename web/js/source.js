@@ -1,7 +1,11 @@
 // Frame sources. Each yields pictures at the requested size, the size of the
 // original; a video of another size is scaled to it. The pictures are
 // ImageBitmaps, which stay on the GPU where the browser has them there and
-// can be handed to the pipeline's worker without copying.
+// can be handed to the pipeline's worker without copying. A clip or file is
+// played frame by frame (clip-player.js) wherever the browser can do that; a
+// camera is live, so it is sampled as it plays.
+
+import { openClipPlayer } from './clip-player.js';
 
 /** A moving synthetic scene: needs no media, so the page always has something to show. */
 function drawPattern(context, width, height, time) {
@@ -50,21 +54,20 @@ async function playingVideo(configure, release) {
   return video;
 }
 
-async function openVideo(kind, options) {
+/** A playing video element for a camera stream or the file at `url`, with what releases it. */
+async function openVideo(kind, url, release) {
   if (kind === 'camera') {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
-    const release = () => stream.getTracks().forEach((track) => track.stop());
-    return { video: await playingVideo((video) => { video.srcObject = stream; }, release), release };
+    const stop = () => stream.getTracks().forEach((track) => track.stop());
+    return { video: await playingVideo((video) => { video.srcObject = stream; }, stop), release: stop };
   }
-  if (kind === 'file' && !options.file) throw new Error('Choose a video file first.');
-  const url = kind === 'file' ? URL.createObjectURL(options.file) : options.url;
-  const release = () => { if (kind === 'file') URL.revokeObjectURL(url); };
   return { video: await playingVideo((video) => { video.src = url; }, release), release };
 }
 
 /**
  * A source of the given kind: 'pattern', 'clip' (options.url), 'camera' or 'file' (options.file).
- * `grab()` resolves to the current frame as an ImageBitmap the caller owns,
+ * `grab()` resolves to the current frame as `{ picture, time }`: an ImageBitmap
+ * the caller owns and when it was captured (ms; in a clip, its time there).
  * `nextFrame()` resolves when a new one is due, `pause()` and `resume()`
  * hold and release the source's own clock, and `stop()` releases
  * everything the source holds.
@@ -75,8 +78,9 @@ export async function openSource(kind, width, height, options = {}) {
     const context = canvas.getContext('2d');
     return {
       async grab() {
-        drawPattern(context, width, height, performance.now() / 1000);
-        return canvas.transferToImageBitmap();
+        const time = performance.now();
+        drawPattern(context, width, height, time / 1000);
+        return { picture: canvas.transferToImageBitmap(), time };
       },
       nextFrame: nextDisplayFrame,
       pause() {},
@@ -84,11 +88,19 @@ export async function openSource(kind, width, height, options = {}) {
       stop() {},
     };
   }
-  const { video, release } = await openVideo(kind, options);
+  if (kind === 'file' && !options.file) throw new Error('Choose a video file first.');
+  const url = kind === 'file' ? URL.createObjectURL(options.file) : options.url;
+  const release = () => { if (kind === 'file') URL.revokeObjectURL(url); };
+  if (kind !== 'camera') {
+    const player = await openClipPlayer(url, width, height, release);
+    if (player) return player;
+  }
+  const { video, release: stopVideo } = await openVideo(kind, url, release);
   return {
-    grab() {
+    async grab() {
       const scaled = video.videoWidth !== width || video.videoHeight !== height;
-      return createImageBitmap(video, scaled ? { resizeWidth: width, resizeHeight: height } : {});
+      const picture = await createImageBitmap(video, scaled ? { resizeWidth: width, resizeHeight: height } : {});
+      return { picture, time: performance.now() };
     },
     nextFrame: () => nextVideoFrame(video),
     pause: () => video.pause(),
@@ -97,7 +109,7 @@ export async function openSource(kind, width, height, options = {}) {
       video.pause();
       video.removeAttribute('src');
       video.srcObject = null;
-      release();
+      stopVideo();
     },
   };
 }

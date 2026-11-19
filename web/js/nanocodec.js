@@ -59,16 +59,17 @@ export async function createNanocodec(codec, width, height, rate, keyInterval) {
 
   return {
     /**
-     * Encode and decode frame `index`, given as packed 4:2:0. The encoder's
+     * Encode and decode frame `index`, given as packed 4:2:0 and captured at
+     * `time` (ms on the source's clock). The encoder's
      * offer to see the second frame before coding the first is not taken up:
      * it would put every picture one frame behind its original.
      */
-    push(picture, index) {
+    push(picture, index, time) {
       source.from_planes(picture, 'I420', COLOUR, width, height, layout);
-      // The frame is coded as captured now: when the page cannot keep up with the source and frames
-      // are missed, rate control gives this one the bits of the time since the last, as a live
-      // sender's does. Coded as one of an unbroken 30 a second it would be starved and go blocky.
-      const packet = encoder.encode_at(source, Math.round(performance.now() * MICROSECONDS_PER_MS));
+      // The frame is coded as captured at `time`: where a live source's frames are missed, rate
+      // control gives this one the bits of the time since the last, as a real sender's does.
+      // Coded as one of an unbroken 30 a second it would be starved and go blocky.
+      const packet = encoder.encode_at(source, Math.round(time * MICROSECONDS_PER_MS));
       // An empty packet repeats the previous picture: that is what a receiver shows.
       if (!encoder.repeat) {
         decoder.decode(packet);

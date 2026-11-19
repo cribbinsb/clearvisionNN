@@ -34,9 +34,9 @@ export function createController({ open, onFrame, onState }) {
     let shown = 0;
     const feed = async () => {
       const asked = performance.now();
-      const picture = await source.grab();
+      const { picture, time } = await source.grab();
       const grabbed = performance.now();
-      pending.push(pipeline.process(picture).then((result) => result && {
+      pending.push(pipeline.process(picture, time).then((result) => result && {
         ...result,
         // What the page's own thread spent fetching the frame, and how long the pipeline held it.
         timings: { ...result.timings, grab: grabbed - asked, turnaround: performance.now() - grabbed },

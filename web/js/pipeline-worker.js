@@ -11,7 +11,7 @@ function serve(scope) {
     async open({ model, backendId, width, height, degrade }) {
       pipeline = await createPipeline(model, backendId, width, height, degrade);
     },
-    frame: ({ picture }) => pipeline.process(picture),
+    frame: ({ picture, time }) => pipeline.process(picture, time),
     async release() {
       const released = pipeline;
       pipeline = null;

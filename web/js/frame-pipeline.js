@@ -35,13 +35,13 @@ export async function createPipeline(model, backendId, width, height, degrade) {
   let upscaling = Promise.resolve();
 
   /** The sender's half: read `picture`, which is consumed, and make the input frame from it. */
-  async function send(picture) {
+  async function send(picture, time) {
     const start = performance.now();
     reader.drawImage(picture, 0, 0);
     picture.close();
     const pixels = reader.getImageData(0, 0, width, height).data;
     const read = performance.now() - start;
-    const sent = await sender.send(pixels);
+    const sent = await sender.send(pixels, time);
     // The sender reuses its frame for the next original, which may arrive before this one is upscaled.
     return sent && { ...sent, frame: sent.frame.slice(), timings: { read, ...sent.timings } };
   }
@@ -65,14 +65,15 @@ export async function createPipeline(model, backendId, width, height, degrade) {
 
   return {
     /**
-     * Process one original, an ImageBitmap this call consumes. Resolves to
+     * Process one original, an ImageBitmap this call consumes, captured at
+     * `time` (ms on the source's clock). Resolves to
      * the original, the bicubic upscale of the input and the network's
      * output, all of one moment and each an ImageBitmap the caller owns,
      * with the time each step took (ms); or to null when the codec is still
      * holding the frame. Calls may overlap; results come in the order asked.
      */
-    process(picture) {
-      const sent = sending.then(() => send(picture));
+    process(picture, time) {
+      const sent = sending.then(() => send(picture, time));
       // A failure is reported through the result; the chains only keep the order.
       sending = sent.catch(() => {});
       const result = upscaling.then(async () => upscale(await sent));

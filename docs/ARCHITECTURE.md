@@ -161,7 +161,8 @@ is found at `p + vector` in the previous frame, in samples of the analysed
 | `js/int8-network.js` | Buffers, pipelines and the dispatches of one frame |
 | `js/int8-schedule.js` | Choosing how many tiles go through the network together, by timing on the device |
 | `js/webgpu-io.js` | WebGPU tensor traffic: input kept in a GPU buffer, only the changing channels uploaded, outputs read back through reused staging buffers; refuses a half-precision model where the GPU lacks `shader-f16` |
-| `js/source.js` | Sources of the original, as ImageBitmaps: sample clips, test pattern, camera, video file |
+| `js/source.js` | Sources of the original, as ImageBitmaps with their capture times: sample clips, test pattern, camera, video file |
+| `js/clip-player.js`, `js/clip-frames.js`, `js/mp4.js` | A clip or file played frame by frame, every frame in order, more slowly when the page cannot keep up; the frame-exact decoder and MP4 reader are nanocodec's |
 | `js/degrade.js`, `js/degrade-presets.js` | The "degrade the input" controls as settings: a list of ready-made inputs, and each step by itself; which codecs the browser offers |
 | `js/sender.js` | The simulated sender and channel: the camera (blur, noise, denoise, reduction), optional codec; pairs decoded frames with their originals |
 | `js/codec.js`, `js/planar.js` | The WebCodecs encode-decode round trip; reading decoded frames as 4:2:0 |

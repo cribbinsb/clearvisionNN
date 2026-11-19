@@ -44,7 +44,7 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
   const expected = [pixels * (words[3] + words[4]), pixels * (2 + words[8] / 4), 4 * pixels, 4 * pixels].map((length) => new Uint32Array(length));
   let moved = 0;
   for (let frame = 0; frame < frames; frame += 1) {
-    const sent = await sender.send(await pixelsOf(await source.grab()));
+    const sent = await sender.send(await pixelsOf((await source.grab()).picture));
     const planes = new Uint8Array(sent.frame);
     const coding = frame % 2 ? { quantiser, key: frame % 8 === 1 } : null; // told on alternate frames
     for (const variant of variants) {

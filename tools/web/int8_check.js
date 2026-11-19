@@ -46,7 +46,7 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
   const results = variants.map(({ tile, group, packedDot }) => ({ tile, group, packedDot, differingWords: 0, times: [] }));
   let distinct = 0;
   for (let frame = 0; frame < frames; frame += 1) {
-    const sent = await sender.send(await pixelsOf(await source.grab()));
+    const sent = await sender.send(await pixelsOf((await source.grab()).picture));
     upscaler.prepare_packed(sent.frame, codec, packed);
     for (const tile of tiles) {
       codec.infer(packed, width, height, tile, reference);

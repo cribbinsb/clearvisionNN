@@ -5,8 +5,8 @@
 /**
  * A host for pipelines, one at a time, in a worker that lives as long as the
  * page. `createPipeline` takes what frame-pipeline.js's does and resolves to a
- * pipeline whose `process(picture)` takes an ImageBitmap of the original
- * (which it consumes) and resolves to that pipeline's result with a `close()`
+ * pipeline whose `process(picture, time)` takes an ImageBitmap of the original
+ * (which it consumes) and when it was captured and resolves to that pipeline's result with a `close()`
  * that frees its pictures, or to null.
  */
 export function createPipelineHost() {
@@ -37,8 +37,8 @@ export function createPipelineHost() {
     async createPipeline(model, backendId, width, height, degrade) {
       await call('open', { model, backendId, width, height, degrade });
       return {
-        async process(picture) {
-          const result = await call('frame', { picture }, [picture]);
+        async process(picture, time) {
+          const result = await call('frame', { picture, time }, [picture]);
           if (!result) return null;
           const close = () => [result.original, result.input, result.output].forEach((each) => each.close());
           return { ...result, close };

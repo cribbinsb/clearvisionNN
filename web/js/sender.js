@@ -15,7 +15,8 @@ const RATE_WINDOW = FRAME_RATE; // coded frames the measured bitrate is taken ov
 
 /**
  * Resolves to a sender for `width` x `height` originals under `degrade` (see
- * degrade.js). `send(original)` resolves to the input frame for the upscaler together with
+ * degrade.js). `send(original, time)`, for an original captured at `time` (ms on the source's
+ * clock), resolves to the input frame for the upscaler together with
  * the original it was made from and whether a frame was lost before it (`gap`), or to null
  * when the codec has nothing yet.
  */
@@ -36,13 +37,13 @@ export async function createSender(width, height, degrade) {
   const packets = []; // { bytes, time } of the newest coded frames, oldest first
   let index = 0;
   return {
-    async send(original) {
+    async send(original, time) {
       const start = performance.now();
       sender.send(original, degrade.blur, degrade.sigma, degrade.denoise, frame);
       const reduced = performance.now();
       if (!codec) return { original, frame, gap: false, coding: null, timings: { degrade: reduced - start, codec: 0 }, info: {} };
-      waiting.push({ original, timestamp: timestampOf(index), degrade: reduced - start, sent: reduced });
-      codec.push(frame, index);
+      waiting.push({ original, timestamp: timestampOf(index), degrade: reduced - start, sent: reduced, time });
+      codec.push(frame, index, time);
       index += 1;
       const decoded = await codec.next(DECODE_WAIT_MS);
       if (!decoded) return null;
@@ -53,11 +54,12 @@ export async function createSender(width, height, degrade) {
         dropped += 1;
       }
       const entry = waiting.shift();
-      packets.push({ bytes: decoded.bytes, time: entry.sent });
+      packets.push({ bytes: decoded.bytes, time: entry.time });
       if (packets.length > RATE_WINDOW) packets.shift();
-      // The rate in real time: the bits sent after the window's first frame, over the time they took.
+      // The rate on the source's clock: the bits sent after the window's first frame, over the time
+      // between their captures.
       const bits = packets.slice(1).reduce((sum, packet) => sum + 8 * packet.bytes, 0);
-      const seconds = (entry.sent - packets[0].time) / 1000;
+      const seconds = (entry.time - packets[0].time) / 1000;
       const { quantiser } = decoded;
       const told = degrade.tellModel && quantiser !== null;
       return {
