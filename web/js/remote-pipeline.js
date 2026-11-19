@@ -34,8 +34,8 @@ export function createPipelineHost() {
   }
 
   return {
-    async createPipeline(model, backendId, width, height, degrade, tuning) {
-      await call('open', { model, backendId, width, height, degrade, tuning });
+    async createPipeline(model, backendId, width, height, degrade, tuning, comparison) {
+      await call('open', { model, backendId, width, height, degrade, tuning, comparison });
       return {
         async process(picture, time) {
           const result = await call('frame', { picture, time }, [picture]);

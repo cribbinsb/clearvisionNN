@@ -8,8 +8,8 @@ import { createPipeline } from './frame-pipeline.js';
 function serve(scope) {
   let pipeline = null;
   const handlers = {
-    async open({ model, backendId, width, height, degrade, tuning }) {
-      pipeline = await createPipeline(model, backendId, width, height, degrade, tuning);
+    async open({ model, backendId, width, height, degrade, tuning, comparison }) {
+      pipeline = await createPipeline(model, backendId, width, height, degrade, tuning, comparison);
     },
     frame: ({ picture, time }) => pipeline.process(picture, time),
     async release() {

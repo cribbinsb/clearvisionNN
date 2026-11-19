@@ -5,6 +5,7 @@
 // model keeps its history while the pictures are examined.
 
 import { backendsFor, usableBackends } from './backends.js';
+import { COMPARISONS } from './comparison-upscale.js';
 import { describeGpu } from './gpu-device.js';
 import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS, FIRST_CLIP, clipUrl } from './clips.js';
 import { createController } from './controller.js';
@@ -13,13 +14,14 @@ import { describe, loadModels } from './models.js';
 import { createPipelineHost } from './remote-pipeline.js';
 import { openSource } from './source.js';
 import { createStats } from './stats.js';
+import { tuningFrom } from './tuning.js';
 import { runUnattended } from './unattended.js';
 import { createView } from './view.js';
 
 const element = (id) => document.getElementById(id);
 const byId = (ids) => Object.fromEntries(ids.map((id) => [id, element(id)]));
 const controls = {
-  ...byId(['source', 'file', 'size', 'model', 'backend', 'split', 'zoom', 'preset', 'blur', 'blurValue', 'noise', 'noiseValue', 'denoise', 'denoiseValue', 'kernel', 'codec', 'rate', 'keyint', 'tellModel', 'pause', 'step']),
+  ...byId(['source', 'file', 'size', 'model', 'backend', 'split', 'zoom', 'preset', 'blur', 'blurValue', 'noise', 'noiseValue', 'denoise', 'denoiseValue', 'kernel', 'codec', 'rate', 'keyint', 'tellModel', 'comparison', 'pause', 'step']),
   view: [...document.querySelectorAll('input[name="view"]')],
 };
 // The codec's time has a cell id of its own: `codec` is the codec control.
@@ -32,18 +34,7 @@ const stats = createStats(statCells());
 const host = createPipelineHost();
 
 let gpu = null; // the GPU the browser offers, in words
-// Switches for finding out why a device is slow, from the address: `?weights=storage` binds the
-// 8-bit network's weights the slower, more widely proven way; `?packed=0` avoids the packed
-// dot-product built-ins; `?products=half`, `float` or `integer` fixes how the products are formed;
-// `?span=<n>` the pixels an invocation computes; `?tile=<n>` sets the tile size.
-const address = new URLSearchParams(location.search);
-const tuning = {
-  ...(address.get('weights') === 'storage' && { uniformWeights: false }),
-  ...(address.get('packed') === '0' && { packedDot: false }),
-  ...(address.has('products') && { floatProducts: address.get('products') === 'float', halfProducts: address.get('products') === 'half' }),
-  ...(address.has('tile') && { tile: Number(address.get('tile')) }),
-  ...(address.has('span') && { span: Number(address.get('span')) }),
-};
+const tuning = tuningFrom(new URLSearchParams(location.search));
 let models = [];
 let backends = []; // those this browser can use
 let degrade = null;
@@ -80,7 +71,8 @@ function readSettings() {
 async function open(settings, session) {
   const { kind, clip, width, height } = settings;
   session.source = await openSource(kind, width, height, { file: settings.file, url: clip && clipUrl(clip.id) });
-  session.pipeline = await host.createPipeline(settings.model, settings.backend, width, height, settings.degrade, tuning);
+  const { kernel } = COMPARISONS.find((comparison) => comparison.id === controls.comparison.value);
+  session.pipeline = await host.createPipeline(settings.model, settings.backend, width, height, settings.degrade, tuning, kernel);
   session.size = [width, height];
   view.resize(width, height);
   return session;
@@ -175,6 +167,9 @@ async function main() {
   ]);
   controls.source.value = `clip:${FIRST_CLIP}`;
   degrade = await setUpDegrade(controls, element('codecNote'));
+  fill(controls.comparison, COMPARISONS.map((comparison) => [comparison.id, comparison.label]));
+  // The comparison upscale is the page's own shader: without WebGPU there is only the upscaler's.
+  controls.comparison.disabled = !backends.some((backend) => backend.needs === 'webgpu');
   for (const control of [...controls.view, controls.zoom]) control.addEventListener('change', applyView);
   applyView();
   const parameters = new URLSearchParams(location.search);
@@ -184,7 +179,7 @@ async function main() {
   }
   // A failed start already shows its error through onState.
   const restart = () => start().catch(() => {});
-  const restarting = ['size', 'model', 'backend', 'file', 'preset', 'blur', 'noise', 'denoise', 'kernel', 'codec', 'rate', 'keyint', 'tellModel'];
+  const restarting = ['size', 'model', 'backend', 'file', 'preset', 'blur', 'noise', 'denoise', 'kernel', 'codec', 'rate', 'keyint', 'tellModel', 'comparison'];
   for (const name of restarting) controls[name].addEventListener('change', restart);
   controls.pause.addEventListener('click', () => {
     if (controls.step.disabled) controller.pause();

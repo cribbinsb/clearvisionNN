@@ -1,7 +1,9 @@
-// Run in the demo page by tools/web/int8_check.py: the 8-bit WebGPU network
+// Run in the demo's site by tools/web/int8_check.py: the 8-bit WebGPU network
 // against the WebAssembly reference on real frames, with the recurrent state
-// fed back through the session frame after frame, and timings of each variant.
-async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
+// fed back through the session frame after frame. The exact forms of the
+// shaders are compared word for word; the approximate one is measured, at the
+// output and layer by layer.
+async ({ directory, clip, frames, width, height, tiles, differences }) => {
   const { runtimeReady } = await import('/js/wasm.js');
   await runtimeReady();
   const { Upscaler, IntegerNetwork } = await import('/pkg/cvnn_web.js');
@@ -12,6 +14,7 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
   const { createCameraPool } = await import('/js/camera-pool.js');
   const { openSource } = await import('/js/source.js');
   const { clipUrl } = await import('/js/clips.js');
+  const { createDifference, readWords } = await import(URL.createObjectURL(new Blob([differences], { type: 'text/javascript' })));
 
   const base = new URL(`/models/${directory}/`, location.origin);
   const contract = await (await fetch(new URL('model.json', base))).json();
@@ -32,21 +35,51 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
   const reference = new Uint32Array(pixels * codec.output_words());
   const picture = new Uint8ClampedArray(16 * pixels);
 
-  // Every tiling asked for, each with every grouping the page would try, plus the spelt-out arithmetic.
+  // The ways the shaders can be written, beyond the tiling: each exact form, in every shape of
+  // the work an option reaches, and the approximate form as the page runs it.
+  const HALF = { form: 'half', span: 4, split: 2 };
+  const ways = [
+    {}, { packedDot: false }, { edgeTests: true }, { span: 4, split: 2 }, { uniformWeights: false },
+    { form: 'float', span: 4 }, { form: 'float', span: 4, uniformWeights: false }, { form: 'float', span: 2, split: 2, edgeTests: true },
+    ...(device.features.has('shader-f16') ? [HALF, { ...HALF, split: 1, edgeTests: true }, { ...HALF, uniformWeights: false }] : []),
+  ];
   const variants = [];
   for (const tile of tiles) {
-    const network = createInt8Network(device, model, width, height, { tile });
-    for (const group of groupCandidates(network.tiles)) variants.push({ tile, group, network, packedDot: network.packedDot });
-    const speltOut = createInt8Network(device, model, width, height, { tile, packedDot: false });
-    variants.push({ tile, group: speltOut.tiles, network: speltOut, packedDot: false });
-    // The float form of the products (what an Apple GPU runs) must give the same words, with the
-    // weights bound either way.
-    for (const uniformWeights of [true, false]) {
-      const float = createInt8Network(device, model, width, height, { tile, floatProducts: true, uniformWeights, span: 4 });
-      variants.push({ tile, group: float.tiles, network: float, packedDot: float.packedDot, float: uniformWeights ? 'uniform' : 'storage' });
+    for (const [index, way] of ways.entries()) {
+      const network = createInt8Network(device, model, width, height, { tile, ...way });
+      // The default way with every grouping of tiles the page would try; the others with one.
+      const groups = index === 0 ? groupCandidates(network.tiles) : [network.tiles];
+      for (const group of groups) variants.push({ tile, group, way, network, difference: createDifference('output', model.outputWords) });
     }
   }
-  const results = variants.map(({ tile, group, packedDot, float }) => ({ tile, group, packedDot, float, differingWords: 0, times: [] }));
+  // Layer by layer on the whole frame: the approximate form's layers each given the exact
+  // form's activations (`alone`), and run on from its own (`through`).
+  const layered = device.features.has('shader-f16') ? {
+    exact: createInt8Network(device, model, width, height, { tile: 0 }),
+    alone: createInt8Network(device, model, width, height, { tile: 0, ...HALF }),
+    through: createInt8Network(device, model, width, height, { tile: 0, ...HALF }),
+    layers: model.layers.map((_, layer) => {
+      const layout = layer === model.layers.length - 1 ? 'output' : 'signed';
+      return { alone: createDifference(layout, model.outputWords), through: createDifference(layout, model.outputWords) };
+    }),
+  } : null;
+
+  async function compareLayers() {
+    const { exact, alone, through, layers } = layered;
+    for (const network of [exact, alone, through]) device.queue.writeBuffer(network.input, 0, packed);
+    for (const [layer, differences] of layers.entries()) {
+      const encoder = device.createCommandEncoder();
+      exact.scratch.forEach((buffer, index) => encoder.copyBufferToBuffer(buffer, 0, alone.scratch[index], 0, buffer.size));
+      const pass = encoder.beginComputePass();
+      for (const network of [exact, alone, through]) network.encode(pass, network.tiles, [layer, layer + 1]);
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+      const [expected, gotAlone, gotThrough] = await Promise.all([exact, alone, through].map((network) => readWords(device, network.target(layer))));
+      differences.alone.add(gotAlone, expected);
+      differences.through.add(gotThrough, expected);
+    }
+  }
+
   let distinct = 0;
   for (let frame = 0; frame < frames; frame += 1) {
     const sent = await camera.capture((await source.grab()).picture);
@@ -54,35 +87,25 @@ async ({ directory, clip, frames, width, height, tiles, timedFrames }) => {
     upscaler.prepare_packed(sent.frame, codec, packed);
     for (const tile of tiles) {
       codec.infer(packed, width, height, tile, reference);
-      for (const [index, variant] of variants.entries()) {
-        if (variant.tile !== tile) continue;
-        const output = await variant.network.run(packed, variant.group);
-        for (let word = 0; word < output.length; word += 1) results[index].differingWords += output[word] !== reference[word];
+      for (const variant of variants) {
+        if (variant.tile === tile) variant.difference.add(await variant.network.run(packed, variant.group), reference);
       }
     }
+    if (layered) await compareLayers();
     distinct = Math.max(distinct, new Set(reference.subarray(0, 4096)).size);
     // The deployed tiling's reference output carries the stream on.
     codec.infer(packed, width, height, model.tile, reference);
     upscaler.finish_packed(codec, reference, picture);
     for (let wait = 0; wait < 3; wait += 1) await source.nextFrame();
   }
-  // Timings on the last frame's input, the variants taking turns so that load drifts over all alike.
-  for (let round = 0; round < timedFrames; round += 1) {
-    for (const [index, variant] of variants.entries()) {
-      const start = performance.now();
-      await variant.network.run(packed, variant.group);
-      results[index].times.push(performance.now() - start);
-    }
-  }
   source.stop();
   camera.release();
-  const quantile = (values, q) => [...values].sort((a, b) => a - b)[Math.floor(q * (values.length - 1))];
   return {
     directory, width, height, frames, errors,
     packedDotAvailable: navigator.gpu.wgslLanguageFeatures?.has('packed_4x8_integer_dot_product') ?? false,
+    halfAvailable: device.features.has('shader-f16'),
     distinctOutputWords: distinct,
-    variants: results.map(({ times, ...rest }) => ({
-      ...rest, ms: [0.1, 0.5, 0.9].map((q) => Number(quantile(times, q).toFixed(2))),
-    })),
+    variants: variants.map(({ tile, group, way, difference }) => ({ tile, group, form: 'integer', ...way, ...difference.report() })),
+    layers: layered ? layered.layers.map(({ alone, through }, layer) => ({ layer, alone: alone.report(), through: through.report() })) : [],
   };
 }

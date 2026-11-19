@@ -8,16 +8,11 @@ import { IntegerNetwork, MotionSearch, coding_plane_levels as codingLevels } fro
 import { requestDevice } from './gpu-device.js';
 import { createGpuRuntime } from './gpu-runtime.js';
 import { parseIntegerModel } from './int8-model.js';
+import { describePlan, planFor } from './int8-plan.js';
 import { createSchedule, groupCandidates } from './int8-schedule.js';
 
 const BLOCK = 8; // side of a motion block, in input samples
 const UNKNOWN_QUANTISER = -1; // what the WebAssembly side takes for "coding not known"
-// GPU makers whose hardware has no packed 8-bit dot product and runs integer arithmetic slowly:
-// there the network's products are formed in float (int8-shaders.js), about ten times quicker on
-// an Apple M5 (measured there). The choice is by maker, not by timing: one frame of the wrong
-// form takes seconds on such a GPU.
-const FLOAT_PRODUCT_VENDORS = ['apple'];
-const FLOAT_SPAN = 4; // pixels of a row an invocation computes there: twice as quick again on an M5
 
 /** The model file's words, refused unless the reference implementation accepts the file. */
 async function loadWords(model) {
@@ -28,8 +23,9 @@ async function loadWords(model) {
 
 /**
  * An upscaler (see upscaler.js) for `model`, an integer export, and `width` x
- * `height` input frames. `options` are int8-network.js's, for checks; how the
- * products are formed is otherwise chosen from the GPU's maker.
+ * `height` input frames. `options` are int8-network.js's, for checks and the
+ * page's diagnostic switches; what they leave open is chosen from the GPU's
+ * maker (int8-plan.js).
  */
 export async function createGpuUpscaler(model, width, height, options = {}) {
   const parsed = parseIntegerModel(await loadWords(model));
@@ -43,15 +39,10 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
 
   async function start() {
     const device = await requestDevice();
-    const slowIntegers = FLOAT_PRODUCT_VENDORS.includes(device.adapterInfo?.vendor);
-    // 16-bit float where the GPU has it, 32-bit float otherwise.
-    const halfProducts = options.halfProducts ?? (slowIntegers && options.floatProducts === undefined && device.features.has('shader-f16'));
-    const floatProducts = options.floatProducts ?? (slowIntegers && !halfProducts);
-    // With float products, several pixels to an invocation: each weight read then serves them all.
-    const span = options.span ?? (floatProducts || halfProducts ? FLOAT_SPAN : 1);
     try {
-      const runtime = createGpuRuntime(device, parsed, model, width, height, canvases, { ...options, floatProducts, halfProducts, span });
-      const variant = `${halfProducts ? '16-bit float' : floatProducts ? 'float' : 'integer'} products, ${span} to an invocation`;
+      const plan = planFor(device, options);
+      const runtime = createGpuRuntime(device, parsed, model, width, height, canvases, plan);
+      const variant = describePlan(plan);
       const started = { device, runtime, variant, schedule: createSchedule(groupCandidates(runtime.tiles)), lost: false };
       device.lost.then(() => { started.lost = true; });
       return started;
