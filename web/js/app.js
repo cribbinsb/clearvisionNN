@@ -22,7 +22,7 @@ const controls = {
   view: [...document.querySelectorAll('input[name="view"]')],
 };
 // The codec's time has a cell id of its own: `codec` is the codec control.
-const statCells = () => ({ ...byId(['fps', 'upscalerFps', 'prepare', 'network', 'finish', 'degrade', 'bitrate', 'coding']), codec: element('codec-time') });
+const statCells = () => ({ ...byId(['fps', 'upscalerFps', 'prepare', 'network', 'compute', 'wait', 'finish', 'degrade', 'bitrate', 'coding']), codec: element('codec-time') });
 const status = element('status');
 const credit = element('credit');
 const view = createView(element('view'), controls.split);

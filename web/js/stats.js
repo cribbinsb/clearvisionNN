@@ -29,6 +29,11 @@ export function createStats(cells) {
       lastFrame = now;
       lastInfo = info;
       for (const key of [...UPSCALER_STEPS, ...SENDER_STEPS]) cells[key].textContent = `${averages[key].toFixed(1)} ms`;
+      // Where the GPU reports its own time, that is the network's figure and the rest of it is
+      // shown as waiting; elsewhere the whole of it is all that is known.
+      const known = 'compute' in averages;
+      cells.compute.textContent = `${(known ? averages.compute : averages.network).toFixed(1)} ms`;
+      cells.wait.textContent = known ? `${Math.max(averages.network - averages.compute, 0).toFixed(1)} ms` : '–';
       const upscaler = UPSCALER_STEPS.reduce((sum, key) => sum + averages[key], 0);
       cells.upscalerFps.textContent = (1000 / upscaler).toFixed(1);
       if ('interval' in averages) cells.fps.textContent = (1000 / averages.interval).toFixed(1);

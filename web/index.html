@@ -11,6 +11,10 @@
 <body>
 <header class="site-header">
   <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">◈</span> clearvision<span>NN</span></a>
+  <nav class="site-sections" aria-label="Site">
+    <a href="./" aria-current="page">Demo</a>
+    <a class="project-link" href="https://github.com/cribbinsb/clearvisionNN" target="_blank" rel="noopener">GitHub</a>
+  </nav>
   <span class="local-badge"><i></i>Runs on this device · no video leaves the page</span>
 </header>
 <main>
@@ -58,7 +62,7 @@
     <div class="metrics" aria-label="Speed">
       <div class="metric"><span class="control-label">FRAMES PER SECOND SHOWN</span><b id="fps">–</b></div>
       <div class="metric"><span class="control-label">UPSCALER ALONE COULD DO</span><b id="upscalerFps">–</b></div>
-      <div class="metric"><span class="control-label">NETWORK</span><b id="network">–</b></div>
+      <div class="metric"><span class="control-label">NETWORK</span><b id="compute">–</b></div>
       <div class="metric"><span class="control-label">BITRATE AT 30 FPS</span><b id="bitrate">–</b></div>
     </div>
   </section>
@@ -111,6 +115,8 @@
   <table id="stats" aria-label="Timings">
     <tr><th colspan="2" class="group">Upscaler</th></tr>
     <tr><th>Before the network: motion search (WebAssembly); with a WebAssembly runtime, also upscale and warp</th><td id="prepare">–</td></tr>
+    <tr><th>Network, from submitting the frame to having its pictures; on "WebGPU 8-bit", everything on the GPU</th><td id="network">–</td></tr>
+    <tr><th>Of that, waiting for the GPU: longer when other programs are using it</th><td id="wait">–</td></tr>
     <tr><th>After the network: blend and colour, with a WebAssembly runtime</th><td id="finish">–</td></tr>
     <tr><th colspan="2" class="group">Simulated sender and channel (not part of the upscaler)</th></tr>
     <tr><th>Camera: blur, noise, denoise and 2× reduction (WebAssembly)</th><td id="degrade">–</td></tr>
@@ -134,7 +140,7 @@
   </details>
 </main>
 <footer>
-  <span>clearvisionNN / live video super-resolution</span>
+  <span>clearvisionNN / live video super-resolution / <a href="https://github.com/cribbinsb/clearvisionNN" target="_blank" rel="noopener">source on GitHub</a></span>
   <span>Sample clips belong to their rights holders: <a href="clips/ATTRIBUTION.md">attribution</a></span>
 </footer>
 <pre id="report" hidden></pre>

@@ -80,7 +80,11 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
       // clock also counts waiting behind other work, which no grouping changes.
       gpu.schedule.record(computing ?? finished - prepared);
       const [conventional, upscaled] = shown;
-      return { conventional, upscaled, timings: { prepare: prepared - start0, network: finished - prepared, finish: 0 } };
+      // `compute` is the GPU's own time for the network, where the device reports it; `network`
+      // also counts waiting for the GPU, which other programs using it lengthen.
+      const timings = { prepare: prepared - start0, network: finished - prepared, finish: 0 };
+      if (computing !== null) timings.compute = computing;
+      return { conventional, upscaled, timings };
     },
     /** Forget earlier frames: the next one starts a new stream. */
     restart() {
