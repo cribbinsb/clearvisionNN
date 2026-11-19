@@ -74,12 +74,14 @@ class Model(nn.Module):
             keep = (torch.rand(batch, 1, device=luma.device) >= options.coding_dropout).float()
         outputs: list[torch.Tensor] = []
         state = previous = luma  # replaced on the first frame, which always resets
+        # Asked of the GPU once for the whole sequence: asking frame by frame makes it wait every frame.
+        cuts = view.reset.all(dim=0).tolist()
         for t in range(frames):
             current = luma[:, t]
             base = upscale(view.frames[:, t])[:, :1]
             # History is dropped only when every sequence of the batch cuts
             # here, which for a single stream is every flagged cut.
-            if t == 0 or bool(view.reset[:, t].all()):
+            if t == 0 or cuts[t]:
                 state = current.new_zeros(batch, options.state_channels, height, width)
                 previous, before = base, current
             else:
