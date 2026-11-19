@@ -17,11 +17,11 @@ const asBitmap = (picture) => (picture instanceof ImageData ? createImageBitmap(
 
 /**
  * A pipeline for `width` x `height` originals: `model` on `backendId`, the
- * input degraded as `degrade` says.
+ * input degraded as `degrade` says; `tuning` goes to the upscaler (upscaler.js).
  */
-export async function createPipeline(model, backendId, width, height, degrade) {
+export async function createPipeline(model, backendId, width, height, degrade, tuning = {}) {
   await runtimeReady();
-  const upscaler = await createUpscaler(model, backendId, width / 2, height / 2);
+  const upscaler = await createUpscaler(model, backendId, width / 2, height / 2, tuning);
   let sender;
   try {
     sender = await createSender(width, height, degrade);

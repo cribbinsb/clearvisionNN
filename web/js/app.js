@@ -32,6 +32,15 @@ const stats = createStats(statCells());
 const host = createPipelineHost();
 
 let gpu = null; // the GPU the browser offers, in words
+// Switches for finding out why a device is slow, from the address: `?weights=storage` binds the
+// 8-bit network's weights the slower, more widely proven way; `?packed=0` avoids the packed
+// dot-product built-ins; `?tile=<n>` sets the tile size.
+const address = new URLSearchParams(location.search);
+const tuning = {
+  ...(address.get('weights') === 'storage' && { uniformWeights: false }),
+  ...(address.get('packed') === '0' && { packedDot: false }),
+  ...(address.has('tile') && { tile: Number(address.get('tile')) }),
+};
 let models = [];
 let backends = []; // those this browser can use
 let degrade = null;
@@ -68,7 +77,7 @@ function readSettings() {
 async function open(settings, session) {
   const { kind, clip, width, height } = settings;
   session.source = await openSource(kind, width, height, { file: settings.file, url: clip && clipUrl(clip.id) });
-  session.pipeline = await host.createPipeline(settings.model, settings.backend, width, height, settings.degrade);
+  session.pipeline = await host.createPipeline(settings.model, settings.backend, width, height, settings.degrade, tuning);
   session.size = [width, height];
   view.resize(width, height);
   return session;

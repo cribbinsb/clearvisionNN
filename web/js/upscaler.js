@@ -25,12 +25,13 @@ function checkContract(model, upscaler, width, height) {
 /**
  * An upscaler for `model` on `backendId`, for `width` x `height` input
  * frames: `process(frame, coding)`, `restart()` and `release()`. A backend
- * that is a whole upscaler provides it; around one that is only a network,
+ * that is a whole upscaler provides it (`tuning` are its own options, for
+ * finding out why a device is slow); around one that is only a network,
  * the WebAssembly session does the rest.
  */
-export function createUpscaler(model, backendId, width, height) {
+export function createUpscaler(model, backendId, width, height, tuning = {}) {
   const backend = backendOf(backendId);
-  if (backend.upscaler) return backend.upscaler(model, width, height);
+  if (backend.upscaler) return backend.upscaler(model, width, height, tuning);
   return createSessionUpscaler(model, backend, width, height);
 }
 
