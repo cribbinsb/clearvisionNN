@@ -11,13 +11,13 @@ const OPTIONAL_FEATURES = ['timestamp-query', 'shader-f16'];
 
 const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-async function requestAdapter() {
+async function requestAdapter(fast = false) {
   if (!('gpu' in navigator)) return null;
   for (let attempt = 0; attempt < ADAPTER_ATTEMPTS; attempt += 1) {
-    // The browser's own choice of GPU, never a preference for the fast one: on a laptop with two,
+    // The browser's own choice of GPU unless the fast one is asked for: on a laptop with two,
     // Chrome draws the page on the integrated GPU, and pictures drawn by WebGPU on the other one
-    // fail to cross over and show as black.
-    const adapter = await navigator.gpu.requestAdapter();
+    // can fail to cross over and show as black (gpu-handover.js), so whoever asks must cope.
+    const adapter = await navigator.gpu.requestAdapter(fast ? { powerPreference: 'high-performance' } : {});
     if (adapter) return adapter;
     await pause(ATTEMPT_INTERVAL_MS);
   }
@@ -37,9 +37,9 @@ export async function describeGpu() {
   return [vendor, architecture, description].filter(Boolean).join(' ') || 'unnamed adapter';
 }
 
-/** Resolves to a new device; rejects if the browser offers no adapter. */
-export async function requestDevice() {
-  const adapter = await requestAdapter();
+/** Resolves to a new device, on the fast GPU of two if `fast`; rejects if the browser offers no adapter. */
+export async function requestDevice({ fast = false } = {}) {
+  const adapter = await requestAdapter(fast);
   if (!adapter) throw new Error('This browser has no usable WebGPU adapter.');
   return adapter.requestDevice({ requiredFeatures: OPTIONAL_FEATURES.filter((feature) => adapter.features.has(feature)) });
 }

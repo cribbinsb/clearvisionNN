@@ -6,11 +6,13 @@
 
 import { IntegerNetwork, MotionSearch, coding_plane_levels as codingLevels } from '../pkg/cvnn_web.js';
 import { requestDevice } from './gpu-device.js';
+import { canvasArrives } from './gpu-handover.js';
 import { createGpuRuntime } from './gpu-runtime.js';
 import { parseIntegerModel } from './int8-model.js';
 import { createSchedule, groupCandidates } from './int8-schedule.js';
 
 const BLOCK = 8; // side of a motion block, in input samples
+const PICTURE_BUFFERS = ['conventional', 'output']; // the GPU's buffers of the two pictures (gpu-runtime.js)
 const UNKNOWN_QUANTISER = -1; // what the WebAssembly side takes for "coding not known"
 // GPU makers whose hardware has no packed 8-bit dot product and runs integer arithmetic slowly:
 // there the network's products are formed in float (int8-shaders.js), about ten times quicker on
@@ -29,9 +31,11 @@ async function loadWords(model) {
 /**
  * An upscaler (see upscaler.js) for `model`, an integer export, and `width` x
  * `height` input frames. `options` are int8-network.js's, for checks; how the
- * products are formed is otherwise chosen from the GPU's maker.
+ * products are formed is otherwise chosen from the GPU's maker. `fastGpu` asks
+ * for the fast GPU of two; `present` fixes how the pictures leave the GPU
+ * ('canvas' or 'copy') where that is not to be found out.
  */
-export async function createGpuUpscaler(model, width, height, options = {}) {
+export async function createGpuUpscaler(model, width, height, { fastGpu = false, present, ...options } = {}) {
   const parsed = parseIntegerModel(await loadWords(model));
   const search = new MotionSearch(width, height);
   const pixels = width * height;
@@ -42,7 +46,10 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
   let shown = []; // the last frame's pictures, closed when the next replaces them
 
   async function start() {
-    const device = await requestDevice();
+    const device = await requestDevice({ fast: fastGpu });
+    // On the fast GPU of two the pictures may not survive being handed to the browser as
+    // canvases; where they do not (or as asked), they are copied out through the processor.
+    const copied = present === 'copy' || (present !== 'canvas' && fastGpu && !(await canvasArrives(device, 2 * width, 2 * height)));
     const slowIntegers = FLOAT_PRODUCT_VENDORS.includes(device.adapterInfo?.vendor);
     // 16-bit float where the GPU has it, 32-bit float otherwise.
     const halfProducts = options.halfProducts ?? (slowIntegers && options.floatProducts === undefined && device.features.has('shader-f16'));
@@ -51,8 +58,8 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
     const span = options.span ?? (floatProducts || halfProducts ? FLOAT_SPAN : 1);
     try {
       const runtime = createGpuRuntime(device, parsed, model, width, height, canvases, { ...options, floatProducts, halfProducts, span });
-      const variant = `${halfProducts ? '16-bit float' : floatProducts ? 'float' : 'integer'} products, ${span} to an invocation`;
-      const started = { device, runtime, variant, schedule: createSchedule(groupCandidates(runtime.tiles)), lost: false };
+      const variant = `${halfProducts ? '16-bit float' : floatProducts ? 'float' : 'integer'} products, ${span} to an invocation${copied ? ', pictures copied out' : ''}`;
+      const started = { device, runtime, variant, copied, schedule: createSchedule(groupCandidates(runtime.tiles)), lost: false };
       device.lost.then(() => { started.lost = true; });
       return started;
     } catch (error) {
@@ -89,11 +96,22 @@ export async function createGpuUpscaler(model, width, height, options = {}) {
       const done = gpu.runtime.submit(frame, vectors, stored && !reset, levels, gpu.schedule.current());
       shown.forEach((picture) => picture.close());
       // Taken before the wait: the canvases hold this frame only until they are next drawn to.
-      shown = canvases.map((canvas) => canvas.transferToImageBitmap());
+      const drawn = canvases.map((canvas) => canvas.transferToImageBitmap());
       // The pictures are handed back only once the GPU has finished them: a browser shows a
       // picture drawn before then as black.
       const computing = await done;
       stored = !gpu.lost;
+      if (gpu.copied) {
+        // The canvases' pictures would arrive black: the same pixels are read back from the GPU's
+        // buffers (packed RGBA words, which are an image's bytes as they stand) and made pictures here.
+        drawn.forEach((picture) => picture.close());
+        const words = await gpu.runtime.read(PICTURE_BUFFERS);
+        shown = await Promise.all(words.map((picture) => createImageBitmap(
+          new ImageData(new Uint8ClampedArray(picture.buffer, picture.byteOffset, picture.byteLength), 2 * width, 2 * height),
+        )));
+      } else {
+        shown = drawn;
+      }
       const finished = performance.now();
       // The tuner goes by the GPU's own time where that is known: the wall
       // clock also counts waiting behind other work, which no grouping changes.

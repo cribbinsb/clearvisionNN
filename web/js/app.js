@@ -36,7 +36,8 @@ let gpu = null; // the GPU the browser offers, in words
 // Switches for finding out why a device is slow, from the address: `?weights=storage` binds the
 // 8-bit network's weights the slower, more widely proven way; `?packed=0` avoids the packed
 // dot-product built-ins; `?products=half`, `float` or `integer` fixes how the products are formed;
-// `?span=<n>` the pixels an invocation computes; `?tile=<n>` sets the tile size.
+// `?span=<n>` the pixels an invocation computes; `?gpu=fast` asks for the fast GPU of two, the
+// pictures then leaving it as `?present=canvas` or `copy` says, or as a test at start-up finds; `?tile=<n>` sets the tile size.
 const address = new URLSearchParams(location.search);
 const tuning = {
   ...(address.get('weights') === 'storage' && { uniformWeights: false }),
@@ -44,6 +45,8 @@ const tuning = {
   ...(address.has('products') && { floatProducts: address.get('products') === 'float', halfProducts: address.get('products') === 'half' }),
   ...(address.has('tile') && { tile: Number(address.get('tile')) }),
   ...(address.has('span') && { span: Number(address.get('span')) }),
+  ...(address.get('gpu') === 'fast' && { fastGpu: true }),
+  ...(address.has('present') && { present: address.get('present') }),
 };
 let models = [];
 let backends = []; // those this browser can use
