@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loading…</title>
+</head>
+<body>
+<script>
+  // This file never changes, so it does not matter that a host lets browsers keep it for a
+  // while. It asks which build is current, in a way no cache can answer, and puts that
+  // build's page in its place: a visitor always gets the newest page on a plain reload.
+  const fresh = (url) => fetch(`${url}?${Date.now()}`, { cache: 'no-store' });
+  fresh('current.json')
+    .then((answer) => answer.json())
+    .then(({ page }) => fresh(page))
+    .then((answer) => answer.text())
+    .then((html) => {
+      document.open();
+      document.write(html);
+      document.close();
+    })
+    .catch((error) => { document.body.textContent = `The page could not be loaded: ${error}`; });
+</script>
+</body>
+</html>

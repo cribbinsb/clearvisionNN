@@ -1,0 +1,1 @@
+{"models": ["recurrent-n-8bit", "recurrent-s-8bit", "recurrent-m-8bit", "recurrent-l-8bit", "recurrent-xl-8bit", "recurrent-m-float"], "first": "recurrent-m-8bit"}
