@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.90"
 license = "BSD-3-Clause"
@@ -26,10 +26,10 @@ categories = ["multimedia::video", "computer-vision"]
 # Published as `clearvisionnn-*` (crates.io), used as `fc_*` in Rust: each key is
 # the directory and library name. The version is what a published crate
 # resolves; the path is what the workspace builds.
-cvnn-common = { package = "clearvisionnn-common", version = "0.1.0", path = "crates/cvnn-common" }
-cvnn-preproc = { package = "clearvisionnn-preproc", version = "0.1.0", path = "crates/cvnn-preproc" }
-cvnn-runtime = { package = "clearvisionnn-runtime", version = "0.1.0", path = "crates/cvnn-runtime" }
-cvnn-models = { package = "clearvisionnn-models", version = "0.1.0", path = "crates/cvnn-models" }
+cvnn-common = { package = "clearvisionnn-common", version = "0.2.0", path = "crates/cvnn-common" }
+cvnn-preproc = { package = "clearvisionnn-preproc", version = "0.2.0", path = "crates/cvnn-preproc" }
+cvnn-runtime = { package = "clearvisionnn-runtime", version = "0.2.0", path = "crates/cvnn-runtime" }
+cvnn-models = { package = "clearvisionnn-models", version = "0.2.0", path = "crates/cvnn-models" }
 # nanocodec's analysis, as published; the workspace builds it from a sibling
 # checkout (../nanocodec), see docs/PROCEDURES.md.
 nc-common = { package = "nanocodec-common", version = "0.4.0", path = "../nanocodec/crates/nc-common" }

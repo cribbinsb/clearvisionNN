@@ -22,7 +22,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "clearvisionnn"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clearvisionnn-common",
  "clearvisionnn-models",
@@ -32,18 +32,18 @@ dependencies = [
 
 [[package]]
 name = "clearvisionnn-common"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "clearvisionnn-models"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clearvisionnn-runtime",
 ]
 
 [[package]]
 name = "clearvisionnn-preproc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clearvisionnn-common",
  "nanocodec-analysis",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "clearvisionnn-py"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clearvisionnn-common",
  "clearvisionnn-preproc",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "clearvisionnn-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clearvisionnn-common",
  "clearvisionnn-preproc",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "clearvisionnn-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clearvisionnn-preproc",
  "clearvisionnn-runtime",

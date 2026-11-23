@@ -14,7 +14,7 @@ With the `models` feature, `clearvisionnn::models` holds the released 8-bit
 models, N to XL, ready to load:
 
 ```toml
-clearvisionnn = { version = "0.1", features = ["models"] }
+clearvisionnn = { version = "0.2", features = ["models"] }
 ```
 
 - Repository, training recipe and models: <https://github.com/cribbinsb/clearvisionNN>

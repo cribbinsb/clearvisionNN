@@ -237,7 +237,7 @@ in `tools/nanocodec.rev`.
 ([crates.io](https://crates.io/crates/clearvisionnn), [docs](https://docs.rs/clearvisionnn)), or in `Cargo.toml`:
 
 ```toml
-clearvisionnn = { version = "0.1", features = ["models"] }
+clearvisionnn = { version = "0.2", features = ["models"] }
 ```
 
 ```rust
