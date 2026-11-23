@@ -16,7 +16,7 @@ INTEGER_FILE = "model.i8"
 
 
 # Raise when the meaning of any field, or of the network's input channels, changes.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 # The colour the runtime converts to and from: 8-bit BT.709, limited range.
 COLOUR = "bt709-limited"
 # Input width and height must be multiples of this (the network halves twice).
@@ -60,9 +60,8 @@ class Contract(BaseModel):
     align: bool
     state_channels: int
     side_planes: bool
-    # The network input is luma alone, optionally with the planes below.
+    # The network input is luma alone, optionally with the plane below.
     luma_only: bool
-    coding_planes: bool
     confidence_plane: bool
     input_channels: int
     fine_channels: int
@@ -108,7 +107,6 @@ def contract_for(
         state_channels=config.state_channels,
         side_planes=config.side_planes,
         luma_only=config.luma_only,
-        coding_planes=config.coding_planes,
         confidence_plane=config.confidence_plane,
         input_channels=layout.in_channels,
         fine_channels=layout.fine_channels,

@@ -6,29 +6,31 @@
 //! Bindings only: the logic is `cvnn_preproc`'s and `cvnn_runtime::fixed`'s.
 
 use cvnn_preproc::{PreprocConfig, Preprocessor};
-use cvnn_runtime::coding::FrameCoding;
-use cvnn_runtime::fixed::{BlockVector, FrameInput, IntegerRuntime, block_vectors, coding_levels};
+use cvnn_runtime::fixed::{BlockVector, FrameInput, IntegerRuntime, block_vectors};
+use cvnn_runtime::grain::GrainProfile;
 use cvnn_runtime::integer::IntegerModel;
 use cvnn_runtime::{Input, ModelSpec};
 use js_sys::{Int32Array, Uint32Array};
 use wasm_bindgen::prelude::*;
 
-use crate::{deliver, to_js_error};
+use crate::{deliver, grain, to_js_error};
 
-/// How a frame was coded, as the page says it: a negative quantiser means unknown.
-fn coding(quantiser: f32, key_frame: bool) -> Option<FrameCoding> {
-    (quantiser >= 0.0).then_some(FrameCoding {
-        quantiser,
-        key_frame,
-    })
+/// The amplitude the page's shaders multiply the grain's noise by under the
+/// profile named `profile`; zero is no grain.
+///
+/// # Errors
+///
+/// If there is no profile of that name.
+#[wasm_bindgen]
+pub fn grain_amplitude(profile: &str) -> Result<i32, JsError> {
+    Ok(grain(profile)?.amplitude())
 }
 
-/// The values of the coding planes on the network's 8-bit grid: known,
-/// quantiser, key frame. A negative `quantiser` means nothing is known.
+/// The amplitude of the profile a stream starts on, before any is named.
 #[wasm_bindgen]
 #[must_use]
-pub fn coding_plane_levels(quantiser: f32, key_frame: bool) -> Vec<i32> {
-    coding_levels(coding(quantiser, key_frame)).to_vec()
+pub fn default_grain_amplitude() -> i32 {
+    GrainProfile::default().amplitude()
 }
 
 /// The motion search of one stream.
@@ -100,11 +102,6 @@ impl IntegerReference {
     ///
     /// If the file is not a valid integer model or does not match the contract.
     #[wasm_bindgen(constructor)]
-    #[allow(
-        clippy::too_many_arguments,
-        clippy::fn_params_excessive_bools,
-        reason = "one argument per field of the contract"
-    )]
     pub fn new(
         words: &[i32],
         width: usize,
@@ -112,7 +109,6 @@ impl IntegerReference {
         temporal: &str,
         align: bool,
         state_channels: usize,
-        coding_planes: bool,
         confidence_plane: bool,
     ) -> Result<IntegerReference, JsError> {
         let model = IntegerModel::from_words(words).map_err(|e| to_js_error(&e))?;
@@ -122,7 +118,6 @@ impl IntegerReference {
             align,
             state_channels,
             input: Input::Luma {
-                coding: coding_planes,
                 confidence: confidence_plane,
             },
         };
@@ -137,9 +132,20 @@ impl IntegerReference {
         self.runtime.restart();
     }
 
+    /// Show the frames from now on with the grain of the profile named
+    /// `profile` (a reference starts on `webcam`).
+    ///
+    /// # Errors
+    ///
+    /// If there is no profile of that name.
+    pub fn set_grain(&mut self, profile: &str) -> Result<(), JsError> {
+        self.runtime.set_grain(grain(profile)?);
+        Ok(())
+    }
+
     /// Upscale one 4:2:0 frame (Y, then U, then V) with the block motion
     /// field `vectors` ([`MotionSearch::push`]); `tile` 0 runs the network on
-    /// the whole frame. A negative `quantiser` means the coding is unknown.
+    /// the whole frame.
     ///
     /// # Errors
     ///
@@ -149,8 +155,6 @@ impl IntegerReference {
         frame: &[u8],
         vectors: &[i32],
         reset: bool,
-        quantiser: f32,
-        key_frame: bool,
         tile: usize,
     ) -> Result<(), JsError> {
         let luma = frame.len() * 2 / 3;
@@ -163,7 +167,6 @@ impl IntegerReference {
             v,
             motion: &motion,
             reset,
-            coding: coding(quantiser, key_frame),
         };
         self.runtime.step(&input, tile).map_err(|e| to_js_error(&e))
     }

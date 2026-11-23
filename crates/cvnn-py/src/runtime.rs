@@ -1,7 +1,6 @@
 //! The runtime session exposed to Python, so that tests can check it against
 //! the training model frame for frame.
 
-use cvnn_runtime::coding::FrameCoding;
 use cvnn_runtime::{Input, ModelSpec, Session};
 use numpy::ndarray::Array3;
 use numpy::{IntoPyArray, PyArray3, PyReadonlyArray2, PyReadonlyArray3};
@@ -32,7 +31,7 @@ pub(crate) struct RuntimeSession {
 impl RuntimeSession {
     #[new]
     #[pyo3(signature = (width, height, planes, temporal, align, state_channels, side_planes,
-                        luma_only=false, coding_planes=false, confidence_plane=false))]
+                        luma_only=false, confidence_plane=false))]
     #[allow(
         clippy::too_many_arguments,
         clippy::fn_params_excessive_bools,
@@ -47,7 +46,6 @@ impl RuntimeSession {
         state_channels: usize,
         side_planes: bool,
         luma_only: bool,
-        coding_planes: bool,
         confidence_plane: bool,
     ) -> PyResult<Self> {
         let spec = ModelSpec {
@@ -55,7 +53,7 @@ impl RuntimeSession {
             temporal: temporal.parse().map_err(to_py_error)?,
             align,
             state_channels,
-            input: Input::from_contract(luma_only, side_planes, coding_planes, confidence_plane)
+            input: Input::from_contract(luma_only, side_planes, confidence_plane)
                 .map_err(to_py_error)?,
         };
         let session = Session::new(spec, width, height).map_err(to_py_error)?;
@@ -66,15 +64,12 @@ impl RuntimeSession {
         })
     }
 
-    /// How the frames prepared from now on were coded: the average quantiser
-    /// (0 to 51) and whether each is a key frame; `None` when unknown.
-    #[pyo3(signature = (quantiser, key_frame=false))]
-    fn set_coding(&mut self, quantiser: Option<f32>, key_frame: bool) {
-        let coding = quantiser.map(|quantiser| FrameCoding {
-            quantiser,
-            key_frame,
-        });
-        self.session.set_coding(coding);
+    /// The grain on the luma of the pictures finished from now on, as the
+    /// name of a profile (`GRAIN_PROFILES`).
+    fn set_grain(&mut self, profile: &str) -> PyResult<()> {
+        self.session
+            .set_grain(profile.parse().map_err(to_py_error)?);
+        Ok(())
     }
 
     /// Forget earlier frames; the next frame starts a new stream.

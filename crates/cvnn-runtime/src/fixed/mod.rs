@@ -1,7 +1,8 @@
 //! Everything around the integer network in fixed point (docs/INTEGER.md,
 //! "The runtime"): the conventional upscale, the motion field, warping
 //! history onto the current frame, the confidence plane, adding the
-//! network's detail, and colour conversion. With `integer`, this is the whole
+//! network's detail, grain on the picture shown (`crate::grain`), and colour
+//! conversion. With `integer`, this is the whole
 //! of a frame in integers, so that a GPU can compute it without anything
 //! crossing back to the processor, and be checked against it bit for bit.
 //!
@@ -17,7 +18,9 @@ mod upscale;
 mod warp;
 
 pub use motion::{BlockVector, block_vectors, vector_steps};
-pub use runtime::{FrameInput, IntegerRuntime, coding_levels};
+pub use runtime::{FrameInput, IntegerRuntime};
+// The grain's amplitude is rounded as everything here is.
+pub(crate) use upscale::round_shift;
 
 /// Steps of a picture sample per 8-bit level, wherever more than 8 bits are
 /// kept: the conventional upscale, the previous output, the output itself.

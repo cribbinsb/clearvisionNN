@@ -1,5 +1,5 @@
 {
- "schema_version": 2,
+ "schema_version": 3,
  "colour": "bt709-limited",
  "size_multiple": 4,
  "name": "recurrent-n-8bit",
@@ -12,15 +12,14 @@
  "state_channels": 16,
  "side_planes": false,
  "luma_only": true,
- "coding_planes": true,
  "confidence_plane": true,
- "input_channels": 25,
+ "input_channels": 22,
  "fine_channels": 1,
- "parameters": 22692,
+ "parameters": 22212,
  "network": "integer",
  "precision": "int8",
  "onnx_sha256": null,
- "checkpoint_hash": "48f7b5b69d322b44",
+ "checkpoint_hash": "44d0c5f2bf1a3ab8",
  "provenance": {
   "recipe": "recipe/README.md",
   "torch_version": "2.12.1+cu130"
@@ -28,7 +27,7 @@
  "integer": {
   "schema_version": 1,
   "file": "model.i8",
-  "sha256": "73e5dbb559ead0b717f51a69f94c56917ec3358414d6c326db7c1a9e06372dbd",
+  "sha256": "ca438e745d1eddcdec14c4ada9f896a9ed3e3dbb7ad25fedfa1047b203fd80f0",
   "state_bits": 8,
   "halo": 6,
   "tile": 128

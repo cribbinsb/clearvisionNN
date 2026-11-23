@@ -1,9 +1,10 @@
 // Everything around the integer network in WGSL: the conventional upscale,
 // the motion field as per-sample flow, warping the previous output and the
 // state onto the current frame, the confidence plane, assembling the
-// network's input, adding its detail, and colour conversion. All of it is
-// integer arithmetic defined in docs/INTEGER.md ("The runtime"); the
-// reference is cvnn_runtime::fixed, which these shaders must match bit for bit.
+// network's input, adding its detail, grain on the picture shown, and colour
+// conversion. All of it is integer arithmetic defined in docs/INTEGER.md
+// ("The runtime", "Grain"); the references are cvnn_runtime::fixed and
+// cvnn_runtime::grain, which these shaders must match bit for bit.
 
 import { packingHelpers } from './int8-forms.js';
 
@@ -11,9 +12,10 @@ export const GROUP_SIDE = 8; // workgroup side, in samples
 const WORKGROUP = `@compute @workgroup_size(${GROUP_SIDE}, ${GROUP_SIDE})`;
 
 // What every pass knows of the frame: the input size, whether history is
-// usable, and the coding planes' values.
+// usable, the amplitude of its grain (0: none), and its index in the stream,
+// which the grain is drawn from.
 const FRAME = `
-struct Frame { size: vec2<i32>, valid: i32, unused: i32, coding: vec4<i32> }
+struct Frame { size: vec2<i32>, valid: i32, grain: i32, index: u32 }
 @group(0) @binding(0) var<uniform> f: Frame;`;
 
 // 2x kernels: taps of an output sample along one axis, as crate::fixed::upscale.
@@ -31,6 +33,35 @@ fn rgba(y: i32, u: i32, v: i32) -> u32 {
   let sums = vec3<i32>(luma + 29372 * cr, luma - 8731 * cr - 3494 * cb, luma + 34610 * cb);
   let c = vec3<u32>(clamp((sums + vec3<i32>(1 << 18u)) >> vec3<u32>(19u), vec3<i32>(0), vec3<i32>(255)));
   return c.x | (c.y << 8u) | (c.z << 16u) | 0xff000000u;
+}`;
+
+// The grain of the 2x2 output samples of an input pixel, in picture steps, as
+// crate::grain: white noise hashed from the frame index, row and column (the
+// sum of a word's four bytes about their mean), blurred 3, 10, 3 each way,
+// times the frame's amplitude. One 4x4 patch of white samples serves all four.
+const GRAIN = `
+fn scramble(word: vec4<u32>) -> vec4<u32> {
+  var v = word;
+  v = (v ^ (v >> vec4<u32>(16u))) * 0x7feb352du;
+  v = (v ^ (v >> vec4<u32>(15u))) * 0x846ca68bu;
+  return v ^ (v >> vec4<u32>(16u));
+}
+// Four white samples of row y, from column x on.
+fn whiteRow(frameKey: u32, x: i32, y: i32) -> vec4<i32> {
+  let rowKey = scramble(vec4<u32>(frameKey ^ (u32(y) * 0x9e3779b1u))).x;
+  let v = scramble(vec4<u32>(rowKey) ^ (vec4<u32>(vec4<i32>(x, x + 1, x + 2, x + 3)) * 0x85ebca6bu));
+  let bytes = (v & vec4<u32>(255u)) + ((v >> vec4<u32>(8u)) & vec4<u32>(255u)) + ((v >> vec4<u32>(16u)) & vec4<u32>(255u)) + (v >> vec4<u32>(24u));
+  return vec4<i32>(bytes) - 510;
+}
+fn grainSteps(p: vec2<i32>) -> vec4<i32> {
+  let frameKey = scramble(vec4<u32>(f.index)).x;
+  var rows: array<vec2<i32>, 4>;
+  for (var j = 0; j < 4; j++) {
+    let w = whiteRow(frameKey, 2 * p.x - 1, 2 * p.y - 1 + j);
+    rows[j] = 3 * w.xy + 10 * w.yz + 3 * w.zw;
+  }
+  let blurred = vec4<i32>(3 * rows[0] + 10 * rows[1] + 3 * rows[2], 3 * rows[1] + 10 * rows[2] + 3 * rows[3]);
+  return (f.grain * ((blurred + 8) >> vec4<u32>(4u)) + 65536) >> vec4<u32>(17u);
 }`;
 
 // One axis of a warp: the first of two samples and the second's weight in 64ths.
@@ -160,22 +191,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
  * The network's input: each input word assembled from the planes its slots
  * name. `model` gives the words (int8-model.js); `contract` says which
  * channel is what: luma; confidence; the state; the previous output folded
- * to input size; the coding planes.
+ * to input size (docs/INTEGER.md, section 1).
  */
 export function assembleShader(model, contract, packedDot) {
   const recurrent = contract.temporal === 'recurrent';
   const confidence = contract.confidence_plane ? 1 : 0;
   const state = recurrent ? contract.state_channels : 0;
-  const folded = recurrent ? 4 : 0;
   const firstState = 1 + confidence;
   const firstFolded = firstState + state;
-  const firstCoding = firstFolded + folded;
   const value = (channel) => {
     if (channel === 0) return 'lumaAt(at)';
     if (channel < firstState) return 'trust';
     if (channel < firstFolded) return `s${(channel - firstState) >> 2}[${(channel - firstState) & 3}]`;
-    if (channel < firstCoding) return `carried[${channel - firstFolded}]`;
-    return `f.coding[${channel - firstCoding}]`;
+    return `carried[${channel - firstFolded}]`;
   };
   const words = [...Array(model.inputWords).keys()].map((word) => {
     const unsigned = word < model.unsignedWords;
@@ -260,8 +288,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }`;
 }
 
-/** The network's detail added to the conventional upscale: the output, kept for the next frame, and as RGBA. */
-export const finishShader = (outputWords) => `${FRAME}${COLOUR}
+/**
+ * The network's detail added to the conventional upscale: the output, kept
+ * for the next frame, and as RGBA. Only the RGBA carries the frame's grain.
+ */
+export const finishShader = (outputWords) => `${FRAME}${COLOUR}${GRAIN}
 @group(0) @binding(1) var<storage, read> base: array<i32>;
 @group(0) @binding(2) var<storage, read> colour: array<u32>;
 @group(0) @binding(3) var<storage, read> outputs: array<u32>;
@@ -275,12 +306,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // Four 16-bit residuals, for the 2x2 output samples row by row.
   let pair = vec2<i32>(bitcast<i32>(outputs[at]), bitcast<i32>(outputs[at + 1]));
   let residual = vec4<i32>((pair.x << 16u) >> 16u, pair.x >> 16u, (pair.y << 16u) >> 16u, pair.y >> 16u);
+  var grain = vec4<i32>(0);
+  if (f.grain != 0) { grain = grainSteps(p); }
   for (var k = 0; k < 4; k++) {
     let q = 2 * p + vec2<i32>(k % 2, k / 2);
     let o = q.y * 2 * f.size.x + q.x;
     let sample = clamp(base[o] + residual[k], 0, 8160);
     previous[o] = sample;
-    picture[o] = rgba(sample, i32(colour[o] & 0xffffu), i32(colour[o] >> 16u));
+    picture[o] = rgba(clamp(sample + grain[k], 0, 8160), i32(colour[o] & 0xffffu), i32(colour[o] >> 16u));
   }
 }`;
 

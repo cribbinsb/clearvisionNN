@@ -7,8 +7,7 @@ const SENDER_STEPS = ['degrade', 'codec'];
 /** What the codec did to the newest frame, in words. */
 function describeCoding(info) {
   if (info.key === undefined) return 'no codec';
-  const told = info.told ? 'the model is told' : 'the model is not told';
-  const quantiser = info.quantiser === null ? 'quantiser not reported by this encoder' : `QP ${info.quantiser}, ${told}`;
+  const quantiser = info.quantiser === null ? 'quantiser not reported by this encoder' : `QP ${info.quantiser}`;
   return `${info.key ? 'key' : 'delta'} frame, ${quantiser}`;
 }
 

@@ -16,7 +16,6 @@ class FrameInput(NamedTuple):
     motion: torch.Tensor  # (batch, 2, rows, cols): block motion towards the previous frame
     side: torch.Tensor  # (batch, SIDE_CHANNELS, rows, cols)
     reset: torch.Tensor  # (batch,) bool: history is unusable for this frame
-    coding: torch.Tensor  # (batch, CODING_CHANNELS): how the frame was coded; zeros if unknown
 
 
 class History(NamedTuple):

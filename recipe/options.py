@@ -10,9 +10,6 @@ import torch
 
 # The state the network carries from frame to frame, in channels at input resolution.
 STATE_CHANNELS = 16
-# Share of training sequences given no coding information (quantiser, frame
-# type), so one model also serves receivers that cannot read it.
-CODING_DROPOUT = 0.3
 # Weight of the steadiness term beside the pixel loss in base training.
 STEADINESS = 0.05
 BASE_RATE = 4e-4
@@ -26,9 +23,9 @@ _SAVED_KEYS = {
     "channels": "ch",
     "blocks": "blocks",
     "state_channels": "hid",
-    "coding_dropout": "qp_drop",
     "steadiness": "steady",
     "perceptual": "lpips",
+    "texture": "texture",
     "rate": "lr",
     "batch": "batch",
     "frames": "frames",
@@ -43,9 +40,9 @@ class Options:
     channels: int
     blocks: int
     state_channels: int = STATE_CHANNELS
-    coding_dropout: float = CODING_DROPOUT
     steadiness: float = STEADINESS
     perceptual: float = 0.0  # weight of the perceptual term; zero in base training
+    texture: float = 0.0  # weight of the texture term (recipe.texture); zero in base training
     rate: float = BASE_RATE
     batch: int = BASE_BATCH
     frames: int = FRAMES

@@ -1,6 +1,6 @@
 //! The session's call-order rules and recovery.
 
-use cvnn_runtime::coding::FrameCoding;
+use cvnn_runtime::grain::GrainProfile;
 use cvnn_runtime::{Input, ModelSpec, Session, Temporal};
 
 const WIDTH: usize = 64;
@@ -15,7 +15,10 @@ fn session(planes: usize) -> cvnn_common::Result<Session> {
         state_channels: STATE,
         input: Input::Picture { side_planes: true },
     };
-    Session::new(spec, WIDTH, HEIGHT)
+    let mut session = Session::new(spec, WIDTH, HEIGHT)?;
+    // These tests read samples of the picture itself.
+    session.set_grain(GrainProfile::None);
+    Ok(session)
 }
 
 fn recurrent_session() -> Session {
@@ -24,10 +27,7 @@ fn recurrent_session() -> Session {
         temporal: Temporal::Recurrent,
         align: true,
         state_channels: STATE,
-        input: Input::Luma {
-            coding: true,
-            confidence: true,
-        },
+        input: Input::Luma { confidence: true },
     };
     Session::new(spec, WIDTH, HEIGHT).unwrap()
 }
@@ -79,13 +79,13 @@ fn restart_recovers_from_an_abandoned_frame_and_drops_history() {
 }
 
 #[test]
-fn the_recurrent_input_carries_confidence_history_and_coding() {
+fn the_recurrent_input_carries_confidence_and_history() {
     let mut session = recurrent_session();
     let plane = WIDTH * HEIGHT;
     let (y, c) = frame(100);
     let first = session.prepare(&y, &c, &c).unwrap().to_vec();
-    assert_eq!(first.len(), (1 + 1 + STATE + 4 + 3) * plane);
-    // No history yet: full confidence, an empty state, and unknown coding.
+    assert_eq!(first.len(), (1 + 1 + STATE + 4) * plane);
+    // No history yet: full confidence and an empty state.
     assert!(
         first[plane..2 * plane]
             .iter()
@@ -96,22 +96,14 @@ fn the_recurrent_input_carries_confidence_history_and_coding() {
             .iter()
             .all(|&v| v == 0.0)
     );
-    assert!(first[(6 + STATE) * plane..].iter().all(|&v| v == 0.0));
 
     let fine = vec![0.0; 4 * plane];
     session.finish(&fine, &vec![0.5; STATE * plane]).unwrap();
-    session.set_coding(Some(FrameCoding {
-        quantiser: 51.0,
-        key_frame: false,
-    }));
     let second = session.prepare(&y, &c, &c).unwrap();
-    // The state the network returned comes back untouched; coding is now known.
+    // The state the network returned comes back untouched.
     assert!(
         second[2 * plane..(2 + STATE) * plane]
             .iter()
             .all(|&v| (v - 0.5).abs() < 1e-6)
     );
-    let coding = &second[(6 + STATE) * plane..];
-    assert!(coding[..2 * plane].iter().all(|&v| (v - 1.0).abs() < 1e-6));
-    assert!(coding[2 * plane..].iter().all(|&v| v == 0.0));
 }

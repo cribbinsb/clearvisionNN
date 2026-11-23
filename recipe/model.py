@@ -4,7 +4,8 @@ A flat stack of 3x3 convolutions at input resolution predicts, for every
 frame, the detail to add to the conventional upscale and a state to carry to
 the next frame. Besides the frame's luma it is given its own previous output
 and state, both moved along the pre-process's motion onto the current frame,
-a plane saying where that motion can be trusted, and the coding information.
+and a plane saying where that motion can be trusted: 22 input planes with 16
+state channels (docs/INTEGER.md, section 1, lists them).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812 - the conventional alias
 from torch import nn
 
-from clearvisionnn.contract import BLOCK_SIZE, CODING_CHANNELS, SR_SCALE
+from clearvisionnn.contract import BLOCK_SIZE, SR_SCALE
 from clearvisionnn.data.batch import Degraded, SequenceBatch
 from clearvisionnn.models.blocks import RepConv, conv_relu, stack, zero_init
 from clearvisionnn.models.resample import block_field_to_flow, upscale
@@ -48,7 +49,8 @@ class Model(nn.Module):
     def __init__(self, options: Options) -> None:
         super().__init__()
         self.options = options
-        inputs = 1 + 1 + options.state_channels + DETAIL_CHANNELS + CODING_CHANNELS
+        # Luma, confidence, the state, and the previous output folded to input resolution.
+        inputs = 1 + 1 + options.state_channels + DETAIL_CHANNELS
         self.stem = conv_relu(inputs, options.channels)
         self.body = stack(options.channels, options.blocks)
         # Zeroed, so training starts from the conventional upscale and an empty state.
@@ -69,9 +71,6 @@ class Model(nn.Module):
         options = self.options
         luma = view.frames[:, :, :1]
         batch, frames, _, height, width = luma.shape
-        keep: torch.Tensor | float = 1.0
-        if self.training:
-            keep = (torch.rand(batch, 1, device=luma.device) >= options.coding_dropout).float()
         # A stream starts at the first frame, and wherever every sequence of the
         # batch cuts (for a single stream, every flagged cut). Asked of the GPU
         # once: asking frame by frame makes it wait every frame.
@@ -94,8 +93,6 @@ class Model(nn.Module):
         confidence = _confidence(luma.flatten(0, 1), before).unflatten(0, (batch, frames))
         from_low = from_low.unflatten(0, (batch, frames))
         from_high = from_high.unflatten(0, (batch, frames))
-        coding = view.coding * (keep[:, None] if self.training else 1.0)  # type: ignore[index]
-        coding = coding[..., None, None].expand(-1, -1, -1, height, width).to(luma.dtype)
         outputs: list[torch.Tensor] = []
         state = previous = luma  # replaced on the first frame, which always starts a stream
         for t in range(frames):
@@ -105,13 +102,7 @@ class Model(nn.Module):
             else:
                 state = _sample(state, from_low[:, t])
                 previous = _sample(previous, from_high[:, t])
-            planes = [
-                luma[:, t],
-                confidence[:, t],
-                state,
-                F.pixel_unshuffle(previous, SR_SCALE),
-                coding[:, t],
-            ]
+            planes = [luma[:, t], confidence[:, t], state, F.pixel_unshuffle(previous, SR_SCALE)]
             out = trunk(torch.cat(planes, 1))
             previous = base[:, t] + F.pixel_shuffle(out[:, :DETAIL_CHANNELS], SR_SCALE)
             state = torch.tanh(out[:, DETAIL_CHANNELS:])

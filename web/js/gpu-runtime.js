@@ -11,7 +11,7 @@ import {
 
 const BLOCK = 8; // side of a motion block, in input samples
 const WORD = 4; // bytes of a word
-const FRAME_BYTES = 32; // the Frame uniform: size, valid, padding, coding
+const FRAME_BYTES = 24; // the Frame uniform: size, valid, grain amplitude, frame index; padded to its alignment
 const PICTURES = ['conventional', 'output'];
 // The steps of a frame in the order they run; `flow` and `errors` only where there is history to warp.
 const ORDER = ['wideChroma', 'conventional', 'flow', 'errors', 'assemble', 'network', 'finish'];
@@ -102,16 +102,18 @@ export function createGpuRuntime(device, model, contract, width, height, canvase
     /**
      * Submit one frame: `planes` is the 4:2:0 frame (Y, U, V bytes), `vectors`
      * its block motion field (Int32Array, dx and dy per block), `valid`
-     * whether the history on the GPU may be used, `coding` the three coding
-     * levels, `group` the tiles per dispatch. Resolves when the GPU has
+     * whether the history on the GPU may be used, `group` the tiles per
+     * dispatch, `grain` the amplitude of the
+     * grain on the output picture (0: none) and `index` the frame's place in
+     * the stream, which the grain is drawn from. Resolves when the GPU has
      * finished it, to `{ compute, steps }`: the milliseconds the GPU spent
      * computing it (null where that cannot be known) and, where steps are
      * timed apart, those of each by name (else null).
      */
-    submit(planes, vectors, valid, coding, group) {
+    submit(planes, vectors, valid, group, grain, index) {
       tilesPerGroup = group;
       parity = 1 - parity;
-      settings.set([width, height, recurrent && valid ? 1 : 0, 0, ...coding, 0]);
+      settings.set([width, height, recurrent && valid ? 1 : 0, grain, index | 0]);
       device.queue.writeBuffer(frame, 0, settings);
       device.queue.writeBuffer(luma[parity], 0, planes, 0, pixels);
       device.queue.writeBuffer(buffers.chroma, 0, planes, pixels, pixels / 2);

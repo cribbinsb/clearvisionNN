@@ -44,7 +44,6 @@ def model_config(options: Options) -> ModelConfig:
         state_channels=options.state_channels,
         side_planes=False,
         luma_only=True,
-        coding_planes=True,
         confidence_plane=True,
     )
 

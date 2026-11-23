@@ -5,8 +5,9 @@ xl), each trained in three steps and then exported:
 
 1. **Base training** from scratch on live data, with a pixel loss and a light
    steadiness term, until held-out PSNR stops improving.
-2. **Sharpening**: a short fine-tune with a perceptual term beside the pixel
-   loss, which restores fine texture a pixel loss averages away.
+2. **Sharpening**: a short fine-tune with a perceptual term and a texture
+   term beside the pixel loss, which restore fine texture a pixel loss
+   averages away, on still and on moving content.
 3. **8-bit conversion**: a short quantisation-aware fine-tune under a
    simulation of the integer runtime (`docs/INTEGER.md`), guided by the
    sharpened float model.
@@ -21,6 +22,7 @@ This directory holds exactly that, one job per file:
 | `data.py` | live loaders, baked pools (reading), augmentation |
 | `clips.py` | prepared validation clips kept on disk; the held-out sets |
 | `losses.py` | pixel loss, steadiness along motion, perceptual term |
+| `texture.py` | the texture term: local amplitude of two bands against the original's |
 | `schedule.py` | the plateau rule of base training, the cosine of the fine-tune |
 | `train.py` | base training and the sharpening fine-tune |
 | `bake.py` | baking pools of training sequences |
@@ -89,9 +91,10 @@ done; done
 
 | Step | Settings |
 | --- | --- |
-| Base | sizes (channels x blocks) s 24x10, m 32x15, l 40x15, xl 64x17; 16 state channels; batch 8, sequences of 6 frames, 128x128 input crops; rate 4e-4 after 100 warm-up steps; steadiness weight 0.05; coding inputs withheld from 30% of sequences; mirror and transpose augmentation; at most 250 clips per dataset; at most 45,000 steps |
+| Base | sizes (channels x blocks) s 24x10, m 32x15, l 40x15, xl 64x17; 16 state channels, 22 input planes (docs/INTEGER.md, section 1: nothing about how a frame was coded is an input); batch 8, sequences of 6 frames, 128x128 input crops; rate 4e-4 after 100 warm-up steps; steadiness weight 0.05; mirror and transpose augmentation; at most 250 clips per dataset; at most 45,000 steps |
 | Plateau rule | every 1,000 steps the mean PSNR over 16 validation clips of every dataset and chain is taken; after 4 checks without a 0.01 dB gain the rate is cut to 0.3 of itself; training ends when a stall follows the third cut; the best weights are kept |
-| Sharpening | the base settings, with perceptual (LPIPS, VGG) weight 0.05 on 16 random frames of each step, batch 32, rate 2e-4 on a cosine, 1,500 steps |
+| Sharpening | the base settings, with perceptual (LPIPS, VGG) weight 0.2 on 16 random frames of each step and the texture term at weight 1, batch 32, rate 2e-4 on a cosine, 1,500 steps |
+| Texture term | on textured places of the original (15x15 mean step between neighbours above 3/255), still or moving, in sequences that met a codec: the difference in local amplitude (root of the 15x15 mean energy) between output and original, in the top octave a half-size input can carry and in the band above it |
 | 8-bit conversion | the sharpening losses with steadiness weight 0.4, plus following the float model's output (weight 1) and its frame-to-frame change (weight 4); batch 8, rate 1e-4 on a cosine to zero, 1,500 steps |
 
 ### Notes

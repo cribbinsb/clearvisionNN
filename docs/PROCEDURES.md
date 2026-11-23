@@ -46,10 +46,11 @@ tools/web/build-nanocodec.sh                    # builds web/nanocodec from ../n
 python3 tools/web/serve.py                      # open http://localhost:8000; an edit is always what runs
 python3 tools/web/smoke.py                      # unattended run in headless Chrome; prints timings
 python3 tools/web/smoke.py --model 2 --backend webgpu    # a float model (index in manifest.json) on a named backend
-python3 tools/web/int8_check.py recurrent-m-8bit         # the 8-bit network's shaders against the Rust reference: exact forms bit for bit, the 16-bit float form within its tolerance
-python3 tools/web/runtime_check.py recurrent-m-8bit      # the whole all-GPU frame against the integer runtime, likewise
+python3 tools/web/int8_check.py recurrent-s-8bit      # the 8-bit network's shaders against the Rust reference: exact forms bit for bit, the 16-bit float form within its tolerance
+python3 tools/web/runtime_check.py recurrent-s-8bit   # the whole all-GPU frame against the integer runtime, likewise
 python3 tools/web/shader_bench.py <model> '[{}, {"form": "float", "span": 4}]'   # the GPU's own time for ways of writing the network's shaders (a diagnostic)
 python3 tools/web/smoke.py --backend webgpu --size 1280x720 --view magnify --noise 3 --codec avc --rate bpp:0.08 --screenshot work/demo-screenshots/x.png
+python3 tools/web/smoke.py --size 1280x720 --preset webcam --switches steps=1   # a ready-made input, with its grain profile on the output; `gpu finish` in the report is the pass the grain is computed in
 cargo run --release -p clearvisionnn-runtime --example timing [width height]   # time each runtime step natively
 ```
 
@@ -63,10 +64,12 @@ cargo run --release -p clearvisionnn-runtime --example timing [width height]   #
 - The two browser checks are the documented proof that the page's shaders
   compute what `cvnn-runtime` defines (CLAUDE.md, "Rules"): run both after any
   change to `web/js/int8-*.js`, `runtime-shaders.js`, `gpu-runtime.js` or
-  `crates/cvnn-runtime/src/{integer,fixed}`. They need Chrome with a GPU, so
+  `crates/cvnn-runtime/src/{integer,fixed,grain}`. They need Chrome with a GPU, so
   `tools/ci/check.sh` cannot run them; it runs the tuner's unit test
   (`tools/web/schedule.test.mjs`). `runtime_check.py` also covers a restart, a
-  lost device, and, over its default 30 frames, every grouping of tiles the
+  lost device, grain on the output picture (every profile taken in turn frame
+  by frame, `--grain`; the network's input on the following frames shows that
+  none of it reached the history), and, over its default 30 frames, every grouping of tiles the
   tuner tries: a grouping that changed the output would show as a difference.
   Both check every form of the shaders: the exact ones must give the
   reference's words; the 16-bit float form, which the checks run wherever the
@@ -90,13 +93,16 @@ cargo run --release -p clearvisionnn-runtime --example timing [width height]   #
   fine-tune (one with `tops`) as an 8-bit model, `model.i8`; `--float`
   exports the float graph of the same weights instead.
 - `--size` of `tools/web/smoke.py` is the size of the original; the upscaler's
-  input is half of it. `--view`, `--zoom`, `--noise`, `--codec`, `--rate`
+  input is half of it. `--view`, `--zoom`, `--preset`, `--noise`, `--codec`, `--rate`
   (`bpp:<bits per pixel>` or `qp:<quantiser>`) and `--keyint` set the page's
-  view and "degrade the input" controls; `--screenshot` saves the view.
+  view and "degrade the input" controls: the ready-made input first, then any
+  step named by itself; `--screenshot` saves the view. There is no grain
+  option: the ready-made input decides the profile (`clean` is `produced`,
+  the others `webcam`).
 - `tools/web/build-nanocodec.sh` builds nanocodec's browser module (read
   from the sibling checkout, or `NANOCODEC=<path>`) so the page can offer
   "nanocodec H.264/HEVC" as the codec of its simulated sender; those report
-  the quantiser and type of every frame, which the page passes to the model.
+  the quantiser and type of every frame, which the page shows.
   Without it the page simply does not list them.
 - `tools/web/build.sh` needs a toolchain with the `wasm32-unknown-unknown`
   target (`~/.cargo/bin` on this machine) and `WASM_BINDGEN` pointing at

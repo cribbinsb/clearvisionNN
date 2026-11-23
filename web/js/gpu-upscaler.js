@@ -1,10 +1,13 @@
 // The upscaler entirely on the GPU, for a model in integer form: the motion
 // search runs in WebAssembly on the small luma plane, and everything else
 // (the conventional upscale, warping history, the network, colour) is the
-// page's own shaders. The pictures come back as bitmaps the GPU still holds;
-// no pixel is read back to the processor.
+// page's own shaders, grain on the output picture included. The pictures
+// come back as bitmaps the GPU still holds; no pixel is read back to the
+// processor.
 
-import { IntegerNetwork, MotionSearch, coding_plane_levels as codingLevels } from '../pkg/cvnn_web.js';
+import {
+  IntegerNetwork, MotionSearch, default_grain_amplitude as defaultGrainAmplitude, grain_amplitude as grainAmplitude,
+} from '../pkg/cvnn_web.js';
 import { requestDevice } from './gpu-device.js';
 import { createGpuRuntime } from './gpu-runtime.js';
 import { parseIntegerModel } from './int8-model.js';
@@ -12,7 +15,6 @@ import { describePlan, planFor } from './int8-plan.js';
 import { createSchedule, groupCandidates } from './int8-schedule.js';
 
 const BLOCK = 8; // side of a motion block, in input samples
-const UNKNOWN_QUANTISER = -1; // what the WebAssembly side takes for "coding not known"
 
 /** The model file's words, refused unless the reference implementation accepts the file. */
 async function loadWords(model) {
@@ -36,6 +38,8 @@ export async function createGpuUpscaler(model, width, height, { stepTimes = fals
   const canvases = [0, 1].map(() => new OffscreenCanvas(2 * width, 2 * height));
   let gpu = null; // { device, runtime, schedule, lost }
   let stored = false; // whether the GPU holds the previous frame's output and state
+  let grain = defaultGrainAmplitude(); // the amplitude of the grain on the output picture; 0: none
+  let index = 0; // frames since the stream started: what each frame's grain is drawn from
   let shown = []; // the last frame's pictures, closed when the next replaces them
 
   async function start() {
@@ -66,11 +70,10 @@ export async function createGpuUpscaler(model, width, height, { stepTimes = fals
   }
   return {
     /** See upscaler.js. The pictures are ImageBitmaps, closed by the next call. */
-    async process(frame, coding) {
+    async process(frame) {
       const start0 = performance.now();
       const reset = search.push(frame.subarray(0, pixels), vectors);
       if (!model.align) vectors.fill(0); // history is used where it lies
-      const levels = codingLevels(coding ? coding.quantiser : UNKNOWN_QUANTISER, Boolean(coding?.key));
       if (gpu.lost) {
         // A lost device took the history with it: start again on a new one, as after a cut.
         stop();
@@ -78,7 +81,8 @@ export async function createGpuUpscaler(model, width, height, { stepTimes = fals
         stored = false;
       }
       const prepared = performance.now();
-      const done = gpu.runtime.submit(frame, vectors, stored && !reset, levels, gpu.schedule.current());
+      const done = gpu.runtime.submit(frame, vectors, stored && !reset, gpu.schedule.current(), grain, index);
+      index += 1;
       shown.forEach((picture) => picture.close());
       // Taken before the wait: the canvases hold this frame only until they are next drawn to.
       shown = canvases.map((canvas) => canvas.transferToImageBitmap());
@@ -103,6 +107,11 @@ export async function createGpuUpscaler(model, width, height, { stepTimes = fals
     restart() {
       search.restart();
       stored = false;
+      index = 0;
+    },
+    /** See upscaler.js. */
+    setGrain(profile) {
+      grain = grainAmplitude(profile);
     },
     /** Read back what the last frame produced (gpu-runtime.js): for checks only. */
     read: (names) => gpu.runtime.read(names),

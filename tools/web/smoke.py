@@ -7,7 +7,11 @@ frames and writes frames per second and per-step timings into `#report`.
 
     python3 tools/web/smoke.py [--backend wasm] [--size 640x360] [--model 0] [--frames 20]
         [--view magnify] [--noise 3] [--codec avc] [--rate bpp:0.08] [--screenshot view.png]
-        [--switches 'form=half&steps=1']
+        [--preset webcam] [--switches 'form=half&steps=1']
+
+`--preset` is one of the page's ready-made inputs; the options that set a
+step of the degradation by itself are applied after it, and only those given.
+The preset also decides the grain profile the output is shown with.
 
 Needs Playwright for Python and a built module (tools/web/build.sh).
 """
@@ -51,6 +55,9 @@ CHROME_FLAGS = [
     "--enable-dawn-features=vulkan_enable_f16_on_nvidia",
 ]
 PAGE_TIMEOUT_MS = 180_000
+# The options that set the page's "degrade the input" controls, in the order the page applies
+# them: a ready-made input first, then each step by itself. One left out stays as the page has it.
+DEGRADE = ("preset", "noise", "blur", "denoise", "kernel", "codec", "rate", "keyint")
 
 
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
@@ -74,9 +81,10 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     query = (
         f"auto={args.backend}&size={args.size}&model={args.model}"
         f"&frames={args.frames}&source={args.source}&view={args.view}&zoom={args.zoom}"
-        f"&noise={args.noise}&codec={args.codec}&rate={args.rate}&keyint={args.keyint}&tell={args.tell}"
-        f"&blur={args.blur}&denoise={args.denoise}&kernel={args.kernel}"
     )
+    for name in DEGRADE:
+        if getattr(args, name) is not None:
+            query += f"&{name}={getattr(args, name)}"
     if args.switches:
         query += f"&{args.switches}"
     url = f"http://127.0.0.1:{server.server_address[1]}/index.html?{query}"
@@ -121,20 +129,18 @@ def main() -> int:
     parser.add_argument("--source", default="pattern", help="'pattern' or 'clip:<id>'")
     parser.add_argument("--view", default="split", choices=VIEWS)
     parser.add_argument("--zoom", type=int, default=4, help="magnification of the magnify view")
-    parser.add_argument("--noise", type=float, default=0.0, help="sensor noise, grey levels")
-    parser.add_argument("--blur", type=float, default=0.0, help="lens blur, pixels of the original")
-    parser.add_argument("--denoise", type=int, default=0, help="camera denoise strength; 0 is off")
-    parser.add_argument("--kernel", default="bicubic", help="area, bilinear, bicubic or lanczos")
     parser.add_argument(
-        "--codec",
-        default="none",
-        help="none; avc, hevc, vp9, av1 (the browser's); nanocodec-h264, -hevc",
+        "--preset", help="a ready-made input: clean (the page's own), webcam, soft, call-good, ..."
     )
+    parser.add_argument("--noise", type=float, help="sensor noise, grey levels")
+    parser.add_argument("--blur", type=float, help="lens blur, pixels of the original")
+    parser.add_argument("--denoise", type=int, help="camera denoise strength; 0 is off")
+    parser.add_argument("--kernel", help="area, bilinear, bicubic or lanczos")
     parser.add_argument(
-        "--tell", type=int, default=1, help="0 withholds the quantiser from the model"
+        "--codec", help="none; avc, hevc, vp9, av1 (the browser's); nanocodec-h264, -hevc"
     )
-    parser.add_argument("--rate", default="bpp:0.08", help="bpp:<bits per pixel> or qp:<quantiser>")
-    parser.add_argument("--keyint", type=int, default=0, help="key-frame interval; 0: first only")
+    parser.add_argument("--rate", help="bpp:<bits per pixel> or qp:<quantiser>")
+    parser.add_argument("--keyint", type=int, help="key-frame interval; 0: first only")
     parser.add_argument("--screenshot", help="write a picture of the view here when the run ends")
     parser.add_argument(
         "--switches",

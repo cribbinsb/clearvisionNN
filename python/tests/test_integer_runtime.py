@@ -13,7 +13,6 @@ from test_integer_network import HEIGHT, WIDTH, _model, _real_frames, _session
 from clearvisionnn.data.features import analyse
 
 LEVELS = 255
-CODING = (30.0, False)
 # Mean distances allowed between the two runtimes: of the output in 8-bit
 # levels, and of the network's input planes in their own steps.
 OUTPUT_LEVELS, INPUT_STEPS = 0.02, 0.1  # and no input sample more than one step away
@@ -29,10 +28,9 @@ def test_integer_runtime_stays_close_to_the_float_runtime() -> None:
     words = model.words()
     network = clearvisionnn_native.IntegerNetwork(words)
     floating = _session(config)
-    floating.set_coding(*CODING)
     integer = clearvisionnn_native.IntegerRuntimeSession(
         words, WIDTH, HEIGHT, config.temporal.value, config.align, config.state_channels,
-        config.coding_planes, config.confidence_plane,
+        config.confidence_plane,
     )  # fmt: skip
     frames = _real_frames()
     features = analyse(np.stack([y for y, _, _ in frames]))
@@ -42,7 +40,7 @@ def test_integer_runtime_stays_close_to_the_float_runtime() -> None:
         result = network.infer(packed, WIDTH, HEIGHT, 0)
         expected = floating.finish(*network.unpack_output(result, WIDTH, HEIGHT))[0]
         motion = np.ascontiguousarray(features.motion[index].numpy(), dtype=np.float32)
-        luma = integer.step(y, u, v, motion, bool(features.reset[index]), *CODING)
+        luma = integer.step(y, u, v, motion, bool(features.reset[index]))
         output_gap = np.abs(np.clip(expected, 0, 1) - luma) * LEVELS
         stored = [words.view(np.int8).astype(int) for words in (packed, integer.packed_input())]
         input_gap = np.abs(stored[0] - stored[1])
@@ -55,7 +53,7 @@ def test_integer_runtime_restarts_cleanly() -> None:
     """After a restart a frame is upscaled exactly as the first frame of a stream is."""
     config, model = _model("recurrent")
     args = (model.words(), WIDTH, HEIGHT, config.temporal.value, config.align,
-            config.state_channels, config.coding_planes, config.confidence_plane)  # fmt: skip
+            config.state_channels, config.confidence_plane)  # fmt: skip
     frames = _real_frames()
     still = np.zeros((2, -(-HEIGHT // 8), -(-WIDTH // 8)), np.float32)
     runtime = clearvisionnn_native.IntegerRuntimeSession(*args)

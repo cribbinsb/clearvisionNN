@@ -26,8 +26,7 @@ async ({ directory, clip, frames, width, height, tiles, differences }) => {
   device.addEventListener('uncapturederror', (event) => errors.push(event.error.message.slice(0, 300)));
 
   const upscaler = new Upscaler(width, height, contract.planes, contract.temporal, contract.align,
-    contract.state_channels, contract.side_planes, contract.luma_only, contract.coding_planes,
-    contract.confidence_plane);
+    contract.state_channels, contract.side_planes, contract.luma_only, contract.confidence_plane);
   const source = await openSource('clip', 2 * width, 2 * height, { url: clipUrl(clip) });
   const camera = createCameraPool(2 * width, 2 * height, { sigma: 0, blur: 0, denoise: 0, kernel: 'bicubic' });
   const pixels = width * height;

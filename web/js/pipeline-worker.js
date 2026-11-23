@@ -4,7 +4,9 @@
 
 import { createPipeline } from './frame-pipeline.js';
 
-/** Answer `scope`'s messages: `open` a pipeline, pass it each `frame`, `release` it. */
+/**
+ * Answer `scope`'s messages: `open` a pipeline, pass it each `frame`, `release` it.
+ */
 function serve(scope) {
   let pipeline = null;
   const handlers = {

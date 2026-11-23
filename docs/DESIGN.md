@@ -346,6 +346,8 @@ All are cheap, low-resolution maps upsampled to the stage where they enter.
 
 The network must also work with planes missing (hardware decode, unknown encoder), so training drops them at random.
 
+**What became of the frame's quantiser and type (November 2026).** The luma-only recurrent models that were released took them as three whole-frame planes (known, quantiser, key frame). They were removed. Told each frame's quantiser, a model used it as a switch for how much to smooth: an encoder's frame quantiser follows the moving foreground, so a still background that had been coded well earlier and was merely being skipped was smoothed and sharpened again as the number moved, and the picture flickered. The replacement models were trained with the three planes always zero, which cured the flicker and left dead inputs in the network and in every runtime, so the inputs were taken out: the network has 22 input planes (docs/INTEGER.md, section 1). Per-block records from a decoder remain an open idea; a per-frame number does not.
+
 ### 8.4 What will be compared
 
 | Variant | Purpose |

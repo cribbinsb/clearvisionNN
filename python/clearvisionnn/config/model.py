@@ -40,8 +40,6 @@ class ModelConfig(Config):
     # The network is shown luma alone (no chroma, no side-plane channels) and
     # reconstructs luma. Always so for RECURRENT, never for BLEND.
     luma_only: bool = False
-    # Luma-only models: also show the network how each frame was coded.
-    coding_planes: bool = False
     # RECURRENT only: also show the network how well motion predicts the frame.
     confidence_plane: bool = False
 
@@ -54,8 +52,6 @@ class ModelConfig(Config):
             raise ValueError("the blend design is not luma-only")
         if recurrent and not self.luma_only:
             raise ValueError("the recurrent design needs luma_only: true")
-        if self.coding_planes and not self.luma_only:
-            raise ValueError("only a luma-only model takes coding planes")
         if self.confidence_plane and not recurrent:
             raise ValueError("only the recurrent design takes a confidence plane")
         return self

@@ -8,7 +8,6 @@ use cvnn_common::{Error, Result};
 use cvnn_preproc::SIDE_CHANNELS;
 
 use crate::SR_SCALE;
-use crate::coding::CODING_CHANNELS;
 
 /// Planes of a picture (Y, U, V).
 pub const PICTURE_CHANNELS: usize = 3;
@@ -59,8 +58,6 @@ pub enum Input {
     },
     /// Luma alone: no chroma and no side-plane channels.
     Luma {
-        /// The network is also given how each frame was coded.
-        coding: bool,
         /// The network is also given how well motion predicts the frame
         /// (recurrent design only).
         confidence: bool,
@@ -73,26 +70,16 @@ impl Input {
     /// # Errors
     ///
     /// [`Error::InvalidSpec`] if they contradict each other.
-    #[allow(
-        clippy::fn_params_excessive_bools,
-        reason = "one argument per field of the contract"
-    )]
     pub fn from_contract(
         luma_only: bool,
         side_planes: bool,
-        coding_planes: bool,
         confidence_plane: bool,
     ) -> Result<Self> {
-        let reason = match (luma_only, side_planes, coding_planes || confidence_plane) {
-            (true, false, _) => {
-                return Ok(Self::Luma {
-                    coding: coding_planes,
-                    confidence: confidence_plane,
-                });
-            }
+        let reason = match (luma_only, side_planes, confidence_plane) {
+            (true, false, confidence) => return Ok(Self::Luma { confidence }),
             (false, _, false) => return Ok(Self::Picture { side_planes }),
             (true, true, _) => "a luma-only model takes no side planes",
-            (false, _, true) => "only a luma-only model takes coding or confidence planes",
+            (false, _, true) => "only a luma-only model takes a confidence plane",
         };
         Err(Error::InvalidSpec(reason.to_owned()))
     }
@@ -141,7 +128,7 @@ impl ModelSpec {
             (Input::Luma { .. }, Temporal::Blend) => "the blend design is not luma-only",
             (Input::Picture { .. }, Temporal::Recurrent) => "the recurrent design is luma-only",
             (Input::Luma { .. }, _) if self.planes != 1 => "a luma-only model reconstructs luma",
-            (Input::Luma { confidence, .. }, Temporal::None) if confidence => {
+            (Input::Luma { confidence }, Temporal::None) if confidence => {
                 "only the recurrent design takes a confidence plane"
             }
             _ => return Ok(()),
@@ -159,7 +146,9 @@ impl ModelSpec {
         }
     }
 
-    /// Channels of the network's input, at input resolution.
+    /// Channels of the network's input, at input resolution. For the
+    /// recurrent design with a confidence plane and 16 state channels that is
+    /// 22; docs/INTEGER.md (section 1, "The network's input") lists them.
     #[must_use]
     pub fn input_channels(&self) -> usize {
         let previous = self.planes * SR_SCALE * SR_SCALE;
@@ -170,10 +159,7 @@ impl ModelSpec {
         };
         let picture = match self.input {
             Input::Picture { .. } => PICTURE_CHANNELS + SIDE_CHANNELS,
-            Input::Luma { coding, confidence } => {
-                1 + usize::from(confidence) * CONFIDENCE_CHANNELS
-                    + usize::from(coding) * CODING_CHANNELS
-            }
+            Input::Luma { confidence } => 1 + usize::from(confidence) * CONFIDENCE_CHANNELS,
         };
         picture + history
     }
@@ -216,19 +202,16 @@ mod tests {
     fn recurrent() -> ModelSpec {
         ModelSpec {
             temporal: Temporal::Recurrent,
-            input: Input::Luma {
-                coding: true,
-                confidence: true,
-            },
+            input: Input::Luma { confidence: true },
             ..spec(1, 16)
         }
     }
 
     #[test]
-    fn the_recurrent_input_is_luma_confidence_state_previous_output_and_coding() {
+    fn the_recurrent_input_is_luma_confidence_state_and_previous_output() {
         let spec = recurrent();
         assert!(spec.validate().is_ok());
-        assert_eq!(spec.input_channels(), 1 + 1 + 16 + 4 + CODING_CHANNELS);
+        assert_eq!(spec.input_channels(), 1 + 1 + 16 + 4);
         assert_eq!((spec.fine_channels(), spec.hidden_channels()), (1, 16));
         assert!(spec.unused_input_channels().is_empty());
     }
@@ -240,8 +223,8 @@ mod tests {
             ..recurrent()
         };
         assert!(chroma_too.validate().is_err());
-        assert!(Input::from_contract(true, true, false, false).is_err());
-        assert!(Input::from_contract(false, false, true, false).is_err());
+        assert!(Input::from_contract(true, true, false).is_err());
+        assert!(Input::from_contract(false, false, true).is_err());
         assert!("recurrent".parse::<Temporal>().is_ok() && "other".parse::<Temporal>().is_err());
     }
 

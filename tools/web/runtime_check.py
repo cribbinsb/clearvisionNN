@@ -8,9 +8,10 @@ Real frames of a bundled clip are upscaled by the page's own GPU upscaler
 `cvnn_runtime::fixed::IntegerRuntime` compiled to WebAssembly. After every frame
 the network's input, its outputs, the conventional upscale and the output
 picture are read back from the GPU and compared. The run covers what a stream
-meets: history carried from frame to frame, coding told and not told, a
-restart, a lost GPU device, and (over enough frames) every grouping of tiles
-the page's tuner tries.
+meets: history carried from frame to frame, a restart, a lost GPU device,
+grain on the output picture under profiles that change from frame to frame
+(none among them), and (over enough frames) every grouping of tiles the
+page's tuner tries.
 
 It is run once with the shaders in the exact integer form, which must give
 the reference's words, and once (where the GPU has 16-bit float) in the
@@ -38,7 +39,10 @@ SCRIPT = Path(__file__).with_suffix(".js")
 PAGE_TIMEOUT_MS = 1_200_000
 # A decoded video only advances in a page that may play it without a click.
 AUTOPLAY = "--autoplay-policy=no-user-gesture-required"
-QUANTISER = 32.0  # the quantiser the model is told on the frames it is told one
+# Grain on the output picture, a profile per frame in turn: every profile the runtime has, none
+# among them (the picture must then be the one without grain). Three, so that over a stream each
+# meets frames with and without history, whether the restart and the lost device fall on it or not.
+GRAINS = "none,webcam,produced"
 
 
 def main() -> int:
@@ -51,13 +55,17 @@ def main() -> int:
     parser.add_argument("--tiles", default="128,0", help="tile sides to check; 0: whole frame")
     parser.add_argument("--restart-at", type=int, default=12, help="frame before which to restart")
     parser.add_argument("--lose-device-at", type=int, default=20, help="frame to lose the GPU at")
+    parser.add_argument(
+        "--grain", default=GRAINS, help="grain profiles, taken in turn frame by frame"
+    )
     parser.add_argument("--channel", default="chrome", help="Playwright browser channel")
     args = parser.parse_args()
     width, height = (int(side) for side in args.size.split("x"))
     request = {
         "directory": args.directory, "clip": args.clip, "frames": args.frames, "width": width,
         "height": height, "tiles": [int(tile) for tile in args.tiles.split(",")],
-        "restartAt": args.restart_at, "loseDeviceAt": args.lose_device_at, "quantiser": QUANTISER,
+        "restartAt": args.restart_at, "loseDeviceAt": args.lose_device_at,
+        "grains": args.grain.split(","),
         "differences": SCRIPT.with_name("differences.js").read_text(),
     }  # fmt: skip
     server = serve()
@@ -71,6 +79,7 @@ def main() -> int:
         browser.close()
     server.shutdown()
     variants = report.pop("variants")
+    report["grain"] = args.grain
     print(json.dumps(report))
     recovered = all(used == 2 for used in report["devicesUsed"])  # each lost one and went on
     failed = not recovered or report["largestVectorInSteps"] <= 0

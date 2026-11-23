@@ -11,7 +11,7 @@ use super::motion::{BlockVector, Flow};
 use super::upscale::round_shift;
 use super::warp::taps;
 use crate::SR_SCALE;
-use crate::coding::{CODING_CHANNELS, FrameCoding, coding_planes};
+use crate::grain::{Grain, GrainProfile, shown};
 use crate::integer::{IntegerModel, UNSIGNED_LEVELS};
 use crate::spec::{Input, ModelSpec, Temporal};
 
@@ -31,14 +31,6 @@ pub struct FrameInput<'a> {
     pub motion: &'a [BlockVector],
     /// History from before this frame is to be discarded.
     pub reset: bool,
-    /// How the frame was coded, if known.
-    pub coding: Option<FrameCoding>,
-}
-
-/// The coding planes' values on the 8-bit grid: what a frame's coding becomes as network input.
-#[must_use]
-pub fn coding_levels(coding: Option<FrameCoding>) -> [i32; CODING_CHANNELS] {
-    coding_planes(coding).map(|value| (value * UNSIGNED_LEVELS as f32).round_ties_even() as i32)
 }
 
 /// A stream being upscaled entirely in integers around an integer model.
@@ -64,6 +56,8 @@ pub struct IntegerRuntime {
     /// The conventional upscale and the output as RGBA words.
     conventional: Vec<u32>,
     picture: Vec<u32>,
+    /// What is added to the output shown, and never to `previous`.
+    grain: Grain,
 }
 
 impl IntegerRuntime {
@@ -107,6 +101,7 @@ impl IntegerRuntime {
             outputs: Vec::new(),
             conventional: vec![0; fine],
             picture: vec![0; fine],
+            grain: Grain::new(height, width),
             model,
         })
     }
@@ -114,6 +109,14 @@ impl IntegerRuntime {
     /// Forget earlier frames: the next one starts a new stream.
     pub fn restart(&mut self) {
         self.stored = false;
+        self.grain.restart();
+    }
+
+    /// The grain the pictures of the frames from now on are shown with (the
+    /// default profile until this is called). Nothing but
+    /// [`IntegerRuntime::picture`] changes.
+    pub fn set_grain(&mut self, profile: GrainProfile) {
+        self.grain.set(profile);
     }
 
     /// Upscale one frame; `tile` is the network's tile side (0: whole frame).
@@ -148,22 +151,20 @@ impl IntegerRuntime {
     }
 
     /// The network's input planes, in the contract's channel order: luma;
-    /// confidence; state; the previous output folded to input size; coding.
+    /// confidence; state; the previous output folded to input size.
     fn write_input(&mut self, frame: &FrameInput) {
         let (height, width) = self.size;
         let plane = height * width;
-        let (luma, mut rest) = self.levels.split_at_mut(plane);
+        let (luma, rest) = self.levels.split_at_mut(plane);
         for (level, &sample) in luma.iter_mut().zip(frame.y) {
             *level = i32::from(sample);
         }
-        let Input::Luma { coding, confidence } = self.spec.input else {
+        let Input::Luma { confidence } = self.spec.input else {
             return; // refused at construction
         };
         if self.spec.temporal == Temporal::Recurrent {
             let (confident, history) = rest.split_at_mut(usize::from(confidence) * plane);
-            let (state, history) = history.split_at_mut(self.state.len());
-            let (folded, after) = history.split_at_mut(FOLD * plane);
-            rest = after;
+            let (state, folded) = history.split_at_mut(self.state.len());
             // The previous output brought onto this frame, at output size, in picture steps.
             let mut carried = self.base[0].clone();
             if self.stored && !frame.reset {
@@ -209,23 +210,17 @@ impl IntegerRuntime {
                 }
             }
         }
-        if coding {
-            for (target, level) in rest
-                .chunks_exact_mut(plane)
-                .zip(coding_levels(frame.coding))
-            {
-                target.fill(level);
-            }
-        }
     }
 
     /// Add the network's detail to the conventional upscale, convert to
-    /// RGBA, and keep what the next frame needs.
+    /// RGBA with the frame's grain, and keep what the next frame needs.
+    /// The grain is only in the picture: what is kept is clean.
     fn finish(&mut self, luma: &[u8]) {
         let (height, width) = self.size;
         let plane = height * width;
         let words = self.model.output_words();
         let [base, u, v] = &self.base;
+        let grain = self.grain.next_frame();
         for (pixel, outputs) in self.outputs.chunks_exact(words).enumerate() {
             let state = &mut self.state;
             let keep = |channel: usize, level: i32| state[channel * plane + pixel] = level;
@@ -235,7 +230,8 @@ impl IntegerRuntime {
                 let at = row * SR_SCALE * width + SR_SCALE * (pixel % width) + offset % SR_SCALE;
                 let sample = (base[at] + residual).clamp(0, PICTURE_MAX);
                 self.previous[at] = sample;
-                self.picture[at] = rgba(sample, u[at], v[at]);
+                let lit = grain.map_or(sample, |steps| shown(sample, steps[at]));
+                self.picture[at] = rgba(lit, u[at], v[at]);
             }
         }
         self.luma_before.copy_from_slice(luma);
@@ -266,7 +262,8 @@ impl IntegerRuntime {
         &self.conventional
     }
 
-    /// The last frame's output luma in picture steps (1/32 of an 8-bit level).
+    /// The last frame's output luma in picture steps (1/32 of an 8-bit
+    /// level), as it is kept for the next frame: without grain.
     #[must_use]
     pub fn luma(&self) -> &[i32] {
         &self.previous

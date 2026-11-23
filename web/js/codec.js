@@ -12,7 +12,7 @@ const COLOUR = { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRan
 
 // Codec strings chosen to cover the page's largest input (960 x 540) at 8 bits.
 // `options` names the per-frame options dictionary of each codec; `h26x`
-// marks those whose quantiser is on the 0-51 scale the models were taught.
+// marks those whose quantiser is on the 0-51 scale the page reports.
 const CODECS = [
   { id: 'avc', label: 'H.264', string: 'avc1.42001f', options: 'avc', h26x: true },
   { id: 'hevc', label: 'HEVC', string: 'hev1.1.6.L93.B0', options: 'hevc', h26x: true },
@@ -74,8 +74,8 @@ export function timestampOf(index) {
  * `keyInterval` is frames between key frames (0: only the first).
  */
 export function createCodec(codec, width, height, rate, keyInterval) {
-  // The quantiser is known only when it was fixed, and means what the models
-  // were taught only for the H.26x family.
+  // The quantiser is known only when it was fixed, and is reported only for
+  // the H.26x family, whose 0-51 scale a reader knows.
   const quantiser = codec.h26x && rate.kind === 'qp' ? rate.value : null;
   const decoded = []; // finished frames, oldest first
   const chunks = new Map(); // what the encoder said about each frame, by timestamp

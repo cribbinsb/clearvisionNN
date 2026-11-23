@@ -5,8 +5,11 @@
 // output picture: word for word for an exact form of the shaders, and by how
 // much for the approximate one, whose differences the history carries from
 // frame to frame. Part-way through, the stream is restarted and the GPU
-// device destroyed, and both must be recovered from.
-async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt, quantiser, differences }) => {
+// device destroyed, and both must be recovered from. The output picture is
+// shown with grain of a profile that changes from frame to frame (`grains`,
+// taken in turn): the pictures must agree with it on, and the network's
+// input on the frames after shows that none of it reached the history.
+async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt, grains, differences }) => {
   const { runtimeReady } = await import('/js/wasm.js');
   await runtimeReady();
   const { IntegerReference, MotionSearch } = await import('/pkg/cvnn_web.js');
@@ -44,7 +47,7 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
   const streams = [];
   for (const tile of tiles) {
     const reference = new IntegerReference(words, width, height, model.temporal, model.align,
-      model.state_channels, model.coding_planes, model.confidence_plane);
+      model.state_channels, model.confidence_plane);
     const variants = [];
     for (const form of forms) {
       devices = [];
@@ -62,7 +65,7 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
     const sent = await camera.capture((await source.grab()).picture);
     sent.picture.close();
     const planes = new Uint8Array(sent.frame);
-    const coding = frame % 2 ? { quantiser, key: frame % 8 === 1 } : null; // told on alternate frames
+    const grain = grains[frame % grains.length];
     for (const stream of streams) {
       // A lost device takes the history on the GPU with it, so the stream starts again as after a restart.
       if (frame === restartAt || frame === loseDeviceAt) {
@@ -72,7 +75,8 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
       const reset = stream.search.push(planes.subarray(0, pixels), vectors);
       if (!model.align) vectors.fill(0);
       moved = Math.max(moved, ...vectors.map(Math.abs));
-      stream.reference.step(planes, vectors, reset, coding ? coding.quantiser : -1, Boolean(coding?.key), stream.tile);
+      stream.reference.set_grain(grain);
+      stream.reference.step(planes, vectors, reset, stream.tile);
       stream.reference.read(...expected);
       for (const variant of stream.variants) {
         devices = variant.devices;
@@ -81,7 +85,8 @@ async ({ directory, clip, frames, width, height, tiles, restartAt, loseDeviceAt,
           await new Promise((resolve) => { setTimeout(resolve, 50); });
         }
         if (frame === restartAt || frame === loseDeviceAt) variant.upscaler.restart();
-        await variant.upscaler.process(planes, coding);
+        variant.upscaler.setGrain(grain);
+        await variant.upscaler.process(planes);
         const got = await variant.upscaler.read(names);
         names.forEach((name, index) => variant.differing[name].add(got[index], expected[index]));
       }

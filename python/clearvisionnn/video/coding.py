@@ -1,7 +1,9 @@
-"""What a decoder knows about how each frame was coded: quantiser and frame type.
+"""How each frame of a degraded clip was coded: quantiser and frame type.
 
-A receiver reads both from the slice headers of the stream it decodes, so they
-cost nothing to supply; they tell the network how much the encoder discarded.
+A record of the degradation, kept beside the pictures for losses and
+measurements that ask whether, and how hard, a frame was coded. It is not an
+input of any network: a model told each frame's quantiser used it as a
+smoothing switch, which flickered (docs/DESIGN.md, section 8.3).
 """
 
 from __future__ import annotations

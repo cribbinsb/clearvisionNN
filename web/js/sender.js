@@ -28,7 +28,7 @@ export async function createSender(width, height, degrade) {
   let index = 0;
   return {
     async send({ picture, frame, timings }, time) {
-      if (!codec) return { original: picture, frame, gap: false, coding: null, timings: { ...timings, codec: 0 }, info: {} };
+      if (!codec) return { original: picture, frame, gap: false, timings: { ...timings, codec: 0 }, info: {} };
       waiting.push({ original: picture, timestamp: timestampOf(index), timings, sent: performance.now(), time });
       codec.push(frame, index, time);
       index += 1;
@@ -47,18 +47,14 @@ export async function createSender(width, height, degrade) {
       // between their captures.
       const bits = packets.slice(1).reduce((sum, packet) => sum + 8 * packet.bytes, 0);
       const seconds = (entry.time - packets[0].time) / 1000;
-      const { quantiser } = decoded;
-      const told = degrade.tellModel && quantiser !== null;
       return {
         original: entry.original,
         // The codec may reuse its picture for the next frame, which can arrive before this one is upscaled.
         frame: decoded.frame.slice(),
         // The frame before this one never arrived: what the upscaler remembers is not its predecessor.
         gap: dropped > 0,
-        // A decoder knows the quantiser only where the codec reports it; the page may withhold it.
-        coding: told ? { quantiser, key: decoded.key } : null,
         timings: { ...entry.timings, codec: performance.now() - entry.sent },
-        info: { key: decoded.key, quantiser, told, kbps: seconds > 0 ? bits / seconds / 1000 : undefined },
+        info: { key: decoded.key, quantiser: decoded.quantiser, kbps: seconds > 0 ? bits / seconds / 1000 : undefined },
       };
     },
     release() {

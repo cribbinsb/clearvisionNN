@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812 - the conventional alias
 
 from clearvisionnn.config.model import ModelConfig, Temporal
-from clearvisionnn.contract import CODING_CHANNELS, SR_SCALE
+from clearvisionnn.contract import SR_SCALE
 from clearvisionnn.models.confidence import confidence
 from clearvisionnn.models.layouts import LAYOUTS, Layout
 from clearvisionnn.models.resample import block_field_to_flow, upscale, warp
@@ -27,8 +27,7 @@ def input_channels(config: ModelConfig) -> int:
     """Channels of the network input, in the order `LumaSR.step` assembles them."""
     recurrent = config.temporal is Temporal.RECURRENT
     history = config.state_channels + LUMA_CHANNELS * SR_SCALE**2 if recurrent else 0
-    coding = CODING_CHANNELS if config.coding_planes else 0
-    return LUMA_CHANNELS + int(config.confidence_plane) + history + coding
+    return LUMA_CHANNELS + int(config.confidence_plane) + history
 
 
 def state_input_channels(config: ModelConfig) -> range:
@@ -43,16 +42,16 @@ class LumaSR(SequenceModel):
 
     Input channels, in order: luma; the confidence plane (if configured); the
     hidden state and the previous output folded to input resolution
-    (recurrent design); the coding planes (if configured). After a reset the
-    conventional upscale and a zero state stand in for history, and confidence
-    is 1: there is no prediction to distrust.
+    (recurrent design); docs/INTEGER.md, section 1, lists them channel by
+    channel. After a reset the conventional upscale and a zero state stand in
+    for history, and confidence is 1: there is no prediction to distrust.
     """
 
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         self._recurrent = config.temporal is Temporal.RECURRENT
         self._align = config.align
-        self._coding, self._confidence = config.coding_planes, config.confidence_plane
+        self._confidence = config.confidence_plane
         self._state = config.state_channels if self._recurrent else 0
         shape = (input_channels(config), LUMA_CHANNELS, self._state, get_size(config.size))
         self.core: Layout = (
@@ -64,7 +63,6 @@ class LumaSR(SequenceModel):
     def step(self, inputs: FrameInput, history: History | None) -> tuple[torch.Tensor, History]:
         """Upscale one frame, using the history of earlier ones if recurrent."""
         frame = inputs.frame
-        batch, _, height, width = frame.shape
         luma, base = frame[:, :LUMA_CHANNELS], upscale(frame)
         parts = [luma]
         if self._recurrent:
@@ -72,9 +70,6 @@ class LumaSR(SequenceModel):
             if self._confidence:
                 parts.append(confidence(luma, carried))
             parts += [hidden, F.pixel_unshuffle(previous, SR_SCALE)]
-        if self._coding:
-            planes = inputs.coding.to(luma.dtype)[:, :, None, None]
-            parts.append(planes.expand(batch, CODING_CHANNELS, height, width))
         fine, coarse = self.core(torch.cat(parts, dim=1))
         output = torch.cat([base[:, :LUMA_CHANNELS] + fine, base[:, LUMA_CHANNELS:]], dim=1)
         return output, History(output, coarse, luma)

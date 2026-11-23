@@ -1,13 +1,15 @@
 # The integer network and runtime
 
-Sections 1 to 6 are the network; section 7 is everything around it. Together
-they are a whole frame in integers, which a GPU computes without anything
-crossing back to the processor.
+Sections 1 to 6 are the network; section 7 is everything around it; section
+9 is the grain the picture can be shown with. Together they are a whole frame
+in integers, which a GPU computes without anything crossing back to the
+processor.
 
 A flat luma model (stem, a stack of blocks, a long skip, a head) run entirely
 in 8-bit planes and 32-bit integer accumulators. This file is the
-specification. `cvnn_runtime::integer` (the network) and `cvnn_runtime::fixed`
-(the runtime) are its reference implementation. The tests' NumPy version of
+specification. `cvnn_runtime::integer` (the network), `cvnn_runtime::fixed`
+(the runtime) and `cvnn_runtime::grain` (the grain) are its reference
+implementation. The tests' NumPy version of
 the network (`python/tests/integer_reference.py`) and the page's WGSL shaders
 (`web/js/int8-shaders.js`, `web/js/runtime-shaders.js`) must agree with it bit
 for bit, with one exception: on a GPU, speed comes first, and section 8 allows
@@ -24,7 +26,7 @@ Every plane is 8 bits per sample.
 
 | Plane | Values | Real value of one step |
 |---|---|---|
-| Unsigned input (luma, confidence, previous output, coding planes) | 0..255 | 1/255 |
+| Unsigned input (luma, confidence, previous output) | 0..255 | 1/255 |
 | Signed input (the recurrent state) | -127..127 | 1/127 |
 | Activation after a ReLU, layer `i` | 0..255 | `top_i`/255, `top_i` learnt in training |
 | State output | -127..127 | 1/127 |
@@ -38,6 +40,34 @@ unsigned value `u` is stored as the signed byte `u - 128`, so that one signed
 packed dot product serves every plane. The state's width is a field of the
 model (`state_bits`, 8 today): a 16-bit state would double the state's words
 in the input and output and need two dot products per state word in the stem.
+
+**The network's input.** This is the one place the input channels are
+listed; the float session (`cvnn-runtime`'s `session/luma.rs`), the integer
+runtime (`fixed/runtime.rs`), the page's shader (`assembleShader`), `LumaSR`
+and the recipe's model all assemble this order. For the released recurrent
+models, 22 channels at input resolution:
+
+| Channel | Content | Plane |
+|---|---|---|
+| 0 | The frame's luma | unsigned |
+| 1 | Confidence: how well motion predicts this frame from the last (section 7), 255 without usable history | unsigned |
+| 2..17 | The recurrent state the network returned for the previous frame, warped onto this one; 0 without usable history | signed |
+| 18..21 | The previous output luma, warped onto this frame and folded 2x2 to input size: channel 18 + k holds output sample (2y + k/2, 2x + k%2); the conventional upscale without usable history | unsigned |
+
+A model without the confidence plane has no channel 1, and one with another
+number of state channels has that many: the rest move up or down. A per-frame
+model takes channel 0 alone.
+
+Until November 2026 three more channels followed (22..24): whether the
+frame's coding was known, its quantiser over 51, and whether it was a key
+frame. They were removed, not left as zeros. A model told each frame's
+quantiser used it as a switch for how much to smooth: an encoder's frame
+quantiser follows the moving foreground, so a still background that had been
+coded well was smoothed and sharpened again as the number moved, which showed
+as flicker. The models that replaced those were trained with the three inputs
+always zero, which left dead weights in every stem and a plane's worth of
+work in every runtime; so the inputs went. A contract of schema version 2 is
+one of the 25-input models and is refused.
 
 ## 2. Accumulation
 
@@ -173,14 +203,13 @@ levels of error, none at 10.
 frame): confidence 255, state 0, and the conventional upscale stands in for
 the previous output.
 
-**Coding planes.** Known, quantiser / 51 and key frame, each
-`round(255 x)` (halves to even); all zero when nothing is known.
-
 **Finish.** Output luma is `clamp(conventional + residual, 0, 8160)` and is
-what the next frame warps. RGBA from Y, U, V in picture steps, BT.709 limited
-range, coefficients in 2^-14: with `L = 19077 (Y - 512)`, `b = U - 4096`,
-`r = V - 4096`: red `L + 29372 r`, green `L - 8731 r - 3494 b`, blue
-`L + 34610 b`, each `clamp(round(x, 19), 0, 255)`.
+what the next frame warps. The picture is that luma, with grain where grain
+is asked for (section 9; the luma kept never has it). RGBA from Y, U, V in
+picture steps, BT.709 limited range, coefficients in 2^-14: with
+`L = 19077 (Y - 512)`, `b = U - 4096`, `r = V - 4096`: red `L + 29372 r`,
+green `L - 8731 r - 3494 b`, blue `L + 34610 b`, each
+`clamp(round(x, 19), 0, 255)`.
 
 **Against the float runtime.** The conventional upscale differs only by its
 rounding to 1/32 level. The rest differs by what fixed point drops: vectors
@@ -300,3 +329,109 @@ interleaved runs on a shared GPU) and an 8% to 18% lower median.
 Every choice can be overridden from the page's address
 (`web/js/tuning.js`), to compare on a device one reload at a time, and
 `tools/web/shader_bench.py` times any of them on this machine.
+
+## 9. Grain
+
+The network takes a camera's sensor noise away with everything else it cannot
+predict, and a picture without it looks waxy. Grain puts noise of the same
+kind back on the luma of the picture that is **shown**:
+
+```
+shown = clamp(output + grain, 0, 8160)        grain = level x unit grain(frame, x, y)
+```
+
+It is not part of the output of "Finish" in section 7: what the next frame
+warps, what the network is given and the state are those of a stream without
+grain, whatever the profile, and the conventional upscale carries none.
+`cvnn_runtime::grain` is the reference; the float session adds the same
+integers to its float luma (`grain / 8160`, unclipped: its colour conversion
+clips), so the float and the integer paths show the same grain to rounding.
+The page's finish shader (`web/js/runtime-shaders.js`) must match the
+reference bit for bit in every form of the network's shaders, the form being
+the network's alone.
+
+**Profiles.** How much grain is one of a few fixed profiles
+(`cvnn_runtime::grain::GrainProfile`), never a number a caller sets: the right
+amount cannot be read from the input, and a level that has to be tuned by
+whoever is watching is a feature that does not work. A profile names a kind
+of source, and its level, in grey levels of the displayed 8-bit luma (the
+deviation of the noise added), is fixed:
+
+| Profile | For | Level |
+|---|---|---|
+| `produced` | clean or produced content: film, television, screen capture | 0.35 |
+| `webcam` | a webcam or video call | 0.75 |
+| `none` | checks against the picture without grain, and a caller that adds its own | 0 |
+
+The two levels came out of a sweep on held-out clips of each kind and are
+written once, in `crates/cvnn-runtime/src/grain/profile.rs`. A stream starts on
+`webcam`, the project's main case, and keeps it until given another; the
+profile can change at any frame, since nothing of the grain is kept. Under
+`none` the picture is word for word the one without grain, and no noise is
+computed. No model outputs a level of its own, and there is no level per
+sample.
+
+**The frame index** counts the frames of a stream from 0, a frame being
+everything finished, with grain or without, and starts again at 0 where the
+stream does (a restart, which is also what the page does after a lost
+frame). It is 32 bits and wraps, after which (2^32 frames) the grain
+repeats. A reset signalled by the pre-process and a lost GPU device do not
+touch it.
+
+**White noise.** All arithmetic is 32-bit, wrapping; a coordinate is its
+two's complement, so the noise is defined at any position, also outside the
+picture.
+
+```
+scramble(v):  v ^= v >> 16;  v *= 0x7feb352d;  v ^= v >> 15;  v *= 0x846ca68b;  v ^= v >> 16
+word(frame, x, y) = scramble(scramble(scramble(frame) ^ (y * 0x9e3779b1)) ^ (x * 0x85ebca6b))
+white(frame, x, y) = (sum of the four bytes of word) - 510
+```
+
+`scramble` is the finaliser known as lowbias32 (Chris Wellons' hash
+prospector, public domain). Row and column are multiplied by odd constants
+and mixed in by exclusive-or, not added: added, two rows whose keys happened
+to lie close would be shifted copies of each other. A white sample is within
+510, with mean zero and variance 4 (256^2 - 1) / 12 = 21845: close to normal,
+its tails ending at 3.45 deviations.
+
+**The noise field.** The white noise is blurred 3, 10, 3 (sixteenths) along
+each axis, so that it reads as grain and not as salt and pepper, and four
+bits are dropped:
+
+```
+sum(x, y) = Σ K[i] K[j] white(frame, x + i - 1, y + j - 1),  K = 3, 10, 3,  i, j = 0..2
+field     = (sum + 8) >> 4                                    within 8160
+```
+
+Its deviation is sqrt(21845) x 118 / 16 = 1090.03 (118^2 is the sum of the
+squares of the nine weights); neighbours along an axis correlate 60/118 and
+9/118, nothing further. Unit grain is `field / 1090.03`. The picture's edge
+is no special case: the white noise beyond it is used.
+
+**Amplitude.** In fixed point, the level rounding halves to even:
+
+```
+level     = round(256 level)                 in 1/256 grey level
+amplitude = (3848 x level + 128) >> 8        3848 = 32 x 2^17 / 1090.03
+grain     = (amplitude x field + 65536) >> 17        in picture steps, 1/32 grey level
+```
+
+One grey level is amplitude 3848 and grain of deviation 32.0 steps. So
+`produced` is level 90 (0.3516 grey levels), amplitude 1353; `webcam` is
+level 192, amplitude 2886; `none` is amplitude 0, which is no grain. No
+product leaves 32 bits: `amplitude x field` is at most 2886 x 8160. Where a
+shader cannot run the reference it is handed the amplitude
+(`GrainProfile::amplitude`, `grain_amplitude` in the page's module), never a
+level, so the float-to-fixed step exists once.
+
+**Against the research prototype** (`unit_grain`): the same form. The
+prototype drew uniform noise from a seeded generator and blurred it 0.2, 0.6,
+0.2 with replicated edges; here the noise is a hash anyone can compute, each
+sample the sum of four bytes (nearer normal), the kernel 0.1875, 0.625,
+0.1875, and the level is rounded to 1/256. The prototype also had a strength
+for the viewer to set and a level map the network learnt; both are gone.
+
+**Cost** at 1280x720 output: on the GPU 16 hashed words per input pixel, in
+the finish pass, which on an RTX 5090 takes about 0.01 ms with it or without;
+in Rust on one core about 2 ms.

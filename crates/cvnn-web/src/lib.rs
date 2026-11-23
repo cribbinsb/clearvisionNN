@@ -7,8 +7,8 @@
 //! arrays the page keeps between frames: allocating megabytes of fresh array
 //! per frame costs the page more than the arithmetic does.
 
-use cvnn_runtime::coding::FrameCoding;
 use cvnn_runtime::colour::yuv444_to_rgba;
+use cvnn_runtime::grain::GrainProfile;
 use cvnn_runtime::{Input, ModelSpec, SR_SCALE, Session};
 use js_sys::{Float32Array, Uint8ClampedArray};
 use wasm_bindgen::prelude::*;
@@ -49,6 +49,11 @@ fn to_js_error(error: &impl core::fmt::Display) -> JsError {
     JsError::new(&error.to_string())
 }
 
+/// The grain profile the page names (`none`, `produced` or `webcam`).
+fn grain(profile: &str) -> Result<GrainProfile, JsError> {
+    profile.parse().map_err(|e| to_js_error(&e))
+}
+
 #[wasm_bindgen]
 impl Upscaler {
     /// A session for `width` x `height` input frames and a model with the
@@ -72,7 +77,6 @@ impl Upscaler {
         state_channels: usize,
         side_planes: bool,
         luma_only: bool,
-        coding_planes: bool,
         confidence_plane: bool,
     ) -> Result<Upscaler, JsError> {
         let spec = ModelSpec {
@@ -80,7 +84,7 @@ impl Upscaler {
             temporal: temporal.parse().map_err(|e| to_js_error(&e))?,
             align,
             state_channels,
-            input: Input::from_contract(luma_only, side_planes, coding_planes, confidence_plane)
+            input: Input::from_contract(luma_only, side_planes, confidence_plane)
                 .map_err(|e| to_js_error(&e))?,
         };
         let session = Session::new(spec, width, height).map_err(|e| to_js_error(&e))?;
@@ -126,20 +130,15 @@ impl Upscaler {
         deliver(tensor, input.length(), |tensor| input.copy_from(tensor))
     }
 
-    /// Say how the frames prepared from now on were coded: the average
-    /// quantiser (0 to 51) and whether each is a key frame. Only a model with
-    /// coding planes uses it.
-    pub fn set_coding(&mut self, quantiser: f32, key_frame: bool) {
-        self.session.set_coding(Some(FrameCoding {
-            quantiser,
-            key_frame,
-        }));
-    }
-
-    /// Say that nothing is known about how the frames were coded (the state
-    /// a session starts in), or that they never met a codec.
-    pub fn clear_coding(&mut self) {
-        self.session.set_coding(None);
+    /// Show the pictures finished from now on with the grain of the profile
+    /// named `profile` on their luma (a session starts on `webcam`).
+    ///
+    /// # Errors
+    ///
+    /// If there is no profile of that name.
+    pub fn set_grain(&mut self, profile: &str) -> Result<(), JsError> {
+        self.session.set_grain(grain(profile)?);
+        Ok(())
     }
 
     /// Forget earlier frames: call after a seek, a source change or a failed

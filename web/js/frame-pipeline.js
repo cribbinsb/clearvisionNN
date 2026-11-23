@@ -18,7 +18,9 @@ const asBitmap = (picture) => (picture instanceof ImageData ? createImageBitmap(
 
 /**
  * A pipeline for `width` x `height` originals: `model` on `backendId`, the
- * input degraded as `degrade` says; `tuning` goes to the upscaler (upscaler.js).
+ * input degraded as `degrade` says and the output shown with the grain
+ * profile it names (the other pictures get none); `tuning` goes to the
+ * upscaler (upscaler.js).
  * `comparison`, a cubic's two parameters, replaces the picture shown as the
  * input with that conventional upscale (comparison-upscale.js); null keeps the
  * upscaler's own.
@@ -26,6 +28,7 @@ const asBitmap = (picture) => (picture instanceof ImageData ? createImageBitmap(
 export async function createPipeline(model, backendId, width, height, degrade, tuning = {}, comparison = null) {
   await runtimeReady();
   const upscaler = await createUpscaler(model, backendId, width / 2, height / 2, tuning);
+  upscaler.setGrain(degrade.grain);
   let sender;
   try {
     sender = await createSender(width, height, degrade);
@@ -51,7 +54,7 @@ export async function createPipeline(model, backendId, width, height, degrade, t
     missed = 0;
     // After a lost frame the motion and the history would describe different moments.
     if (sent.gap) upscaler.restart();
-    const result = await upscaler.process(sent.frame, sent.coding);
+    const result = await upscaler.process(sent.frame);
     const [own, output] = await Promise.all([result.conventional, result.upscaled].map(asBitmap));
     const input = compared ? await compared.render(sent.frame) : own;
     if (compared) own.close();

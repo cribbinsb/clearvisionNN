@@ -28,7 +28,7 @@ input it was given.
 | L | 40 channels × 15 layers | 259 k | about 250 k |
 | XL | 64 channels × 17 layers | 726 k | about 720 k |
 
-Measured on 25 Xiph test sequences the models never saw, 640×360 input to
+The first release (V1), measured on 25 Xiph test sequences, 640×360 input to
 1280×720, against the same input enlarged with a bicubic filter. "Camera" is
 clean camera input; "codec" is the same after H.264/H.265 at 0.04 to 0.3 bits
 per pixel. The figures are for the float models; the 8-bit versions the demo
@@ -44,6 +44,73 @@ runs are within 0.01 dB of them on the validation set.
 
 After a low-bitrate codec the gain is small for every model: the detail is no
 longer in the input to recover.
+
+Two of those 25 sequences (crowd-run and park-joy) were later found among the
+V1 training clips, so the V1 figures above are slightly flattering; V2 was
+trained without them.
+
+## V2 models (November 2026)
+
+The demo opens on the V2 models; the V1 models are still in its model list
+for comparison. V2 keeps the same networks, sizes and speed. What changed:
+
+- **Texture.** V1 smoothed fine texture, most visibly on a background that
+  had been still for a while after an encode ("waxy"). V2's sharpening stage
+  has a term that asks for the original's amount of texture, on still and
+  moving parts of the picture, and a stronger perceptual term (LPIPS weight
+  0.2, was 0.05). This is a deliberate trade: more texture and better
+  perceptual scores for about 0.1 to 0.3 dB of PSNR on clean camera input.
+- **No coding inputs.** V1 took three planes saying how each frame was coded
+  (quantiser, key frame). Told the quantiser, the model used it as a switch
+  for how much to smooth, which flickered as an encoder's quantiser moved.
+  V2 takes 22 input planes and nothing about the coding. The V1 models in the
+  demo are the released ones with those inputs removed, which computes exactly
+  what they did when given zeros.
+- **More varied training data.** About 4,500 training clips, up from about
+  1,500: more webcam models, user-generated video, street and hand-held
+  footage, nature, night scenes and screen recordings. Webcam and phone
+  material is still 65 % of every batch. The clear gain is on screen content;
+  on webcam material the extra data made little difference.
+- **A longer base schedule** (40,000 steps; M uses 20,000).
+- **A clean test split.** Eleven scenes that were both in the training data
+  and among the test clips were taken out of training.
+- **Grain on the output.** The runtime adds a little fixed-level grain to the
+  displayed luma (never fed back to the network): 0.35 grey levels for
+  produced content, 0.75 for webcam and video-call input. An encoder removes a
+  camera's noise and the network cannot know how much there was; without it
+  the picture looks cleaner than the original ever did.
+
+The 8-bit models, validation and held-out clips (not the Xiph set above),
+V1 run without its coding inputs. LPIPS: lower is better. "Still" and
+"moving" are crops of long-still background and of moving texture after an
+encode at 0.08 bits per pixel; "camera" and "codec" are whole held-out clips;
+"screen" is held-out screen recordings as camera input; "flicker" is the
+frame-to-frame change, in grey levels, where the input does not change.
+
+| Size | Model | Still LPIPS | Moving LPIPS | Camera PSNR / LPIPS | Codec PSNR / LPIPS | Screen PSNR | Flicker |
+|---|---|---|---|---|---|---|---|
+| N | V1 | 0.0693 | 0.1179 | 37.60 / 0.0922 | 33.11 / 0.2016 | 27.10 | 0.180 |
+| N | V2 | 0.0737 | 0.1111 | 37.41 / 0.0879 | 33.06 / 0.1963 | 27.30 | 0.166 |
+| S | V1 | 0.0745 | 0.1172 | 37.86 / 0.0884 | 33.15 / 0.1986 | 27.30 | 0.185 |
+| S | V2 | 0.0660 | 0.1107 | 37.67 / 0.0810 | 33.28 / 0.1864 | 27.73 | 0.188 |
+| M | V1 | 0.0733 | 0.1200 | 38.03 / 0.0867 | 33.37 / 0.1937 | 27.40 | 0.179 |
+| M | V2 | 0.0714 | 0.1068 | 37.75 / 0.0807 | 33.30 / 0.1860 | 27.93 | 0.198 |
+| L | V1 | 0.0721 | 0.1171 | 38.09 / 0.0860 | 33.41 / 0.1942 | 27.48 | 0.182 |
+| L | V2 | 0.0702 | 0.1035 | 37.98 / 0.0706 | 33.37 / 0.1858 | 28.14 | 0.191 |
+| XL | V1 | 0.0785 | 0.1201 | 38.27 / 0.0777 | 33.57 / 0.1963 | 27.81 | 0.167 |
+| XL | V2 | 0.0652 | 0.0979 | 38.04 / 0.0659 | 33.33 / 0.1801 | 28.30 | 0.177 |
+
+V2 is better at every size on moving texture (6 to 18 %), on camera and codec
+LPIPS, and on screen content (0.2 to 0.7 dB). It is worse on camera PSNR at
+every size (0.11 to 0.28 dB), which is the texture trade; N's still-crop LPIPS
+is 6 % worse; flicker is a little higher at S, M, L and XL; XL loses 0.24 dB on
+coded input. Each V2 model is a single training run. V1 trained on some of
+the scenes the still and moving crops come from and V2 did not, so those two
+columns favour V1.
+
+What V2 does not fix: faint texture, under about four grey levels, is still
+lost after an encode. The encoder has already removed most of it before the
+network sees the frame, and three attempts to train it back failed.
 
 ## How it works
 
@@ -61,10 +128,11 @@ runtime.
 - 16 channels of the network's own memory from the previous frame, moved the
   same way;
 - a confidence plane: how well the motion predicted this frame from the last,
-  block by block, so the network knows where its memory is not to be trusted;
-- three coding planes: the frame's quantiser and whether it is a key frame,
-  when the decoder knows them. They are zero when it does not, or when there
-  is no codec, so one model serves both kinds of input.
+  block by block, so the network knows where its memory is not to be trusted.
+
+That is 22 planes, and nothing about how the frame was coded: a model told
+each frame's quantiser used it as a switch for how much to smooth, which
+flickered, so one model serves coded and uncoded input alike without it.
 
 **3. The network (`python/clearvisionnn/models`).** A plain stack of 3×3
 convolutions with ReLU at the input's resolution, with one long skip
@@ -100,8 +168,8 @@ outline:
    degradation chains that imitate a sender. The camera chain adds sensor
    noise, applies a camera's edge-preserving denoise and reduces by two. The
    codec chain adds noise, reduces, and encodes with x264 or x265 in a
-   low-delay configuration at 0.04 to 0.3 bits per pixel, keeping each
-   frame's quantiser and type. One model is trained on both.
+   low-delay configuration at 0.04 to 0.3 bits per pixel. One model is
+   trained on both.
 2. **Base training.** Sequences of six frames, unrolled through the recurrent
    network, with a Charbonnier pixel loss and a small term that penalises
    frame-to-frame change where the original does not change. Mirror and
@@ -109,7 +177,7 @@ outline:
    cut when the held-out score stops improving, and training ends after
    three cuts.
 3. **Sharpening.** A short fine-tune adds a perceptual term (LPIPS, weight
-   0.05) beside the pixel loss. It gives up about 0.2 dB of PSNR for a clearly
+   0.2; 0.05 in V1) and, from V2, a texture-amplitude term beside the pixel loss. It gives up about 0.2 dB of PSNR for a clearly
    better LPIPS, more detail and a higher VMAF.
 4. **Conversion to 8 bits.** Quantisation-aware training in which the 8-bit
    model follows the float model's output and its frame-to-frame change, at a

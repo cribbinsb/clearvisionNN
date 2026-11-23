@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use cvnn_preproc::{PreprocConfig, Preprocessor};
 use cvnn_runtime::colour::{Yuv420, rgba_to_yuv420, yuv444_to_rgba};
+use cvnn_runtime::grain::GrainProfile;
 use cvnn_runtime::{Input, ModelSpec, Session, Temporal};
 
 const FRAMES: usize = 60;
@@ -75,14 +76,14 @@ fn main() {
     let recurrent = ModelSpec {
         temporal: Temporal::Recurrent,
         state_channels: RECURRENT_STATE_CHANNELS,
-        input: Input::Luma {
-            coding: true,
-            confidence: true,
-        },
+        input: Input::Luma { confidence: true },
         ..full
     };
-    for spec in [full, blend, recurrent] {
+    // Each design without grain, and one with: what `finish` then takes longer is the grain's cost.
+    let (off, on) = (GrainProfile::None, GrainProfile::Webcam);
+    for (spec, grain) in [(full, off), (blend, off), (recurrent, off), (recurrent, on)] {
         let mut session = Session::new(spec, width, height).expect("size");
+        session.set_grain(grain);
         let fine = vec![0.0f32; spec.fine_channels() * 4 * width * height];
         let coarse = vec![0.0f32; spec.hidden_channels() * width * height];
         let mut out = vec![0u8; 16 * width * height];
@@ -95,7 +96,7 @@ fn main() {
             let picture = steps[1].time(|| session.finish(&fine, &coarse).expect("frame"));
             steps[2].time(|| yuv444_to_rgba(picture, &mut out));
         }
-        println!("temporal = {:?}", spec.temporal);
+        println!("temporal = {:?}, grain profile {grain:?}", spec.temporal);
         for (timings, name) in steps
             .into_iter()
             .zip(["  prepare", "  finish", "  YUV to RGBA"])

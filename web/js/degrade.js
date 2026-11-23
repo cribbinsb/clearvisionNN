@@ -1,7 +1,9 @@
 // The "degrade the input" controls: what the simulated sender and channel do
 // to the picture before the upscaler sees it, as plain settings. A list of
 // ready-made inputs (degrade-presets.js) sets everything at once; the
-// advanced controls set each step by itself.
+// advanced controls set each step by itself. The grain profile of the output
+// is read with them, because which one suits depends on the input: the
+// ready-made input decides it, and there is no control of its own.
 
 import { bitrateFor, supportedCodecs } from './codec.js';
 import { CUSTOM, PRESET_CODECS, PRESETS } from './degrade-presets.js';
@@ -14,10 +16,10 @@ const QUANTISERS = [24, 28, 32, 36, 40, 44];
 const KERNELS = [['bicubic', 'Bicubic'], ['bilinear', 'Bilinear'], ['area', 'Area (box)'], ['lanczos', 'Lanczos']];
 // Codec support is asked about at a typical input size; an unusual size can still fail at start.
 const PROBE_SIZE = [640, 360];
-// Each level slider with the element that shows its reading.
-const SLIDERS = [['blur', 'blurValue'], ['noise', 'noiseValue'], ['denoise', 'denoiseValue']];
+// Each level slider with the element that shows its reading, and the decimals of the reading.
+const SLIDERS = [['blur', 'blurValue', 1], ['noise', 'noiseValue', 1], ['denoise', 'denoiseValue', 1]];
 // The controls a preset sets and whose change makes the input a custom one.
-const ADVANCED = ['blur', 'noise', 'denoise', 'kernel', 'codec', 'rate', 'keyint', 'tellModel'];
+const ADVANCED = ['blur', 'noise', 'denoise', 'kernel', 'codec', 'rate', 'keyint'];
 const FIRST_KEY_ONLY = '0'; // the key-frame choice of a real-time call
 
 /** A codec with how it runs here and whether its quantiser can be fixed. */
@@ -26,7 +28,7 @@ function describeCodec(codec) {
   return `${codec.label} (${kind}${codec.quantiser ? ', fixed quantiser available' : ', bitrate only'})`;
 }
 
-// nanocodec's encoders that report a quantiser on the scale the models were taught.
+// nanocodec's encoders, which report each frame's quantiser on the H.26x scale.
 const NANOCODECS = [
   { id: 'nanocodec-h264', label: 'nanocodec H.264', name: 'h264' },
   { id: 'nanocodec-hevc', label: 'nanocodec HEVC', name: 'hevc' },
@@ -36,8 +38,8 @@ const fill = (select, options) => select.replaceChildren(...options.map(([value,
 
 /**
  * Fill the controls from what this browser can do. `controls` holds the
- * preset, blur, noise, denoise (each with its `...Value` reading), kernel,
- * codec, rate, keyint and tellModel elements; `note` gets a sentence about
+ * preset, the blur, noise and denoise sliders (each with its `...Value` reading)
+ * and the kernel, codec, rate and keyint elements; `note` gets a sentence about
  * what is available. Returns `{ read, refresh }`.
  */
 export async function setUpDegrade(controls, note) {
@@ -52,7 +54,7 @@ export async function setUpDegrade(controls, note) {
   ]);
   const chosen = () => codecs.find((codec) => codec.id === controls.codec.value) ?? null;
   const found = browser?.length ? `The browser's encoders: ${browser.map(describeCodec).join(', ')}.` : 'This browser offers no video encoder of its own.';
-  const reported = own.length ? 'nanocodec reports the quantiser and type of every frame, which the model can be told; the browser\'s encoders do not.' : 'nanocodec is not built here (tools/web/build-nanocodec.sh), so no encoder reports its quantiser.';
+  const reported = own.length ? 'nanocodec reports the quantiser and type of every frame; the browser\'s encoders do not.' : 'nanocodec is not built here (tools/web/build-nanocodec.sh), so no encoder reports its quantiser.';
   note.textContent = `${found} ${reported}`;
   controls.codec.disabled = !codecs.length;
 
@@ -66,7 +68,7 @@ export async function setUpDegrade(controls, note) {
   customOption.hidden = true;
 
   const showReadings = () => {
-    for (const [slider, reading] of SLIDERS) controls[reading].textContent = Number(controls[slider].value).toFixed(1);
+    for (const [slider, reading, decimals] of SLIDERS) controls[reading].textContent = Number(controls[slider].value).toFixed(decimals);
   };
 
   /** Set every advanced control to what the chosen preset stands for. */
@@ -79,9 +81,6 @@ export async function setUpDegrade(controls, note) {
     controls.codec.value = preset.bitsPerPixel === null ? 'none' : presetCodec;
     if (preset.bitsPerPixel !== null) controls.rate.value = `bpp:${preset.bitsPerPixel}`;
     controls.keyint.value = FIRST_KEY_ONLY;
-    // Off: an encoder's frame quantiser follows the moving foreground, and told it the model
-    // smooths and flickers a still background that was in fact coded well.
-    controls.tellModel.checked = false;
     showReadings();
   }
   controls.preset.addEventListener('change', applyPreset);
@@ -101,7 +100,6 @@ export async function setUpDegrade(controls, note) {
     showReadings();
     controls.rate.disabled = !codec;
     controls.keyint.disabled = !codec;
-    controls.tellModel.disabled = !codec?.h26x;
     for (const option of controls.rate.options) {
       const [kind, value] = option.value.split(':');
       if (kind === 'bpp') option.text = `${value} bits per pixel · ${Math.round(bitrateFor(Number(value), width, height) / 1000)} kbit/s`;
@@ -113,7 +111,8 @@ export async function setUpDegrade(controls, note) {
   /**
    * The settings for `width` x `height` input: the camera's blur, noise and
    * denoise levels and its reduction kernel, then the codec (or null), its
-   * rate and key-frame interval.
+   * rate and key-frame interval; and `grain`, the profile of the grain the
+   * output of such an input is shown with (docs/INTEGER.md, section 9).
    */
   function read(width, height) {
     const [kind, value] = controls.rate.value.split(':');
@@ -127,7 +126,7 @@ export async function setUpDegrade(controls, note) {
       codec,
       rate,
       keyInterval: Number(controls.keyint.value),
-      tellModel: controls.tellModel.checked,
+      grain: (PRESETS.find((preset) => preset.id === controls.preset.value) ?? CUSTOM).grain,
       askedKbps: codec && kind === 'bpp' ? bitrateFor(rate.value, width, height) / 1000 : null,
     };
   }

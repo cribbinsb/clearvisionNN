@@ -2,7 +2,6 @@
 //! tests and for scoring it against the float definitions it replaces.
 
 use cvnn_common::MotionVector;
-use cvnn_runtime::coding::FrameCoding;
 use cvnn_runtime::fixed::{FrameInput, IntegerRuntime, PICTURE_MAX, vector_steps};
 use cvnn_runtime::integer::IntegerModel;
 use cvnn_runtime::{Input, ModelSpec, SR_SCALE};
@@ -39,10 +38,8 @@ impl IntegerRuntimeSession {
     /// `words` (a model file), whose contract the other arguments give.
     #[new]
     #[allow(
-        clippy::too_many_arguments,
-        clippy::fn_params_excessive_bools,
         clippy::needless_pass_by_value,
-        reason = "one argument per field of the contract; PyO3 extracts arguments by value"
+        reason = "PyO3 extracts arguments by value"
     )]
     fn new(
         words: PyReadonlyArray1<'_, i32>,
@@ -51,7 +48,6 @@ impl IntegerRuntimeSession {
         temporal: &str,
         align: bool,
         state_channels: usize,
-        coding_planes: bool,
         confidence_plane: bool,
     ) -> PyResult<Self> {
         let model = IntegerModel::from_words(contiguous(words.as_slice().ok())?);
@@ -61,7 +57,6 @@ impl IntegerRuntimeSession {
             align,
             state_channels,
             input: Input::Luma {
-                coding: coding_planes,
                 confidence: confidence_plane,
             },
         };
@@ -78,10 +73,18 @@ impl IntegerRuntimeSession {
         self.runtime.restart();
     }
 
+    /// The grain on the pictures of the frames from now on, as the name of
+    /// a profile (`GRAIN_PROFILES`). Only `picture` shows it.
+    fn set_grain(&mut self, profile: &str) -> PyResult<()> {
+        self.runtime
+            .set_grain(profile.parse().map_err(to_py_error)?);
+        Ok(())
+    }
+
     /// Upscale one 4:2:0 frame. `motion` is the block field as (2, rows,
     /// cols): dx then dy, in input samples. Returns the output luma
-    /// (2 height, 2 width) in [0, 1].
-    #[pyo3(signature = (y, u, v, motion, reset, quantiser=None, key_frame=false, tile=0))]
+    /// (2 height, 2 width) in [0, 1], as it is kept: without grain.
+    #[pyo3(signature = (y, u, v, motion, reset, tile=0))]
     #[allow(
         clippy::too_many_arguments,
         clippy::needless_pass_by_value,
@@ -95,8 +98,6 @@ impl IntegerRuntimeSession {
         v: PyReadonlyArray2<'py, u8>,
         motion: PyReadonlyArray3<'py, f32>,
         reset: bool,
-        quantiser: Option<f32>,
-        key_frame: bool,
         tile: usize,
     ) -> PyResult<Bound<'py, PyArray2<f32>>> {
         let field = contiguous(motion.as_slice().ok())?;
@@ -112,10 +113,6 @@ impl IntegerRuntimeSession {
             v: contiguous(v.as_slice().ok())?,
             motion: &vectors,
             reset,
-            coding: quantiser.map(|quantiser| FrameCoding {
-                quantiser,
-                key_frame,
-            }),
         };
         let runtime = &mut self.runtime;
         py.allow_threads(|| runtime.step(&frame, tile))

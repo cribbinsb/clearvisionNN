@@ -1,4 +1,4 @@
-"""The training loss: a pixel term, steadiness along motion, and a perceptual term."""
+"""The training loss: a pixel term, steadiness along motion, perceptual and texture terms."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from clearvisionnn.losses.perceptual import LumaLpips
 from clearvisionnn.models.resample import warp
 from recipe.model import motion_flows
 from recipe.options import Options
+from recipe.texture import texture_term
 
 # Keeps the square root's gradient finite at zero error.
 CHARBONNIER_EPSILON = 1e-6
@@ -63,4 +64,8 @@ class TrainingLoss:
                 output.float().flatten(0, 1)[pick], target.flatten(0, 1)[pick]
             )
             loss = loss + options.perceptual * distance
+        if options.texture:
+            # The first value of a frame's coding record says whether it met a codec at all.
+            coded = batch.view.coding[:, :, 0] > 0
+            loss = loss + options.texture * texture_term(output, target, coded)
         return loss

@@ -49,7 +49,7 @@ def _model(
     recurrent = temporal == "recurrent"
     config = ModelConfig(
         layout="flat", size="s", temporal=temporal, luma_only=True, side_planes=False,
-        coding_planes=True, confidence_plane=recurrent,
+        confidence_plane=recurrent,
     )  # fmt: skip
     core = trained_core(build_model(config))
     layout = core.layout if isinstance(core, BoundedState) else core
@@ -62,10 +62,13 @@ def _model(
 
 
 def _session(config: ModelConfig) -> clearvisionnn_native.RuntimeSession:
-    return clearvisionnn_native.RuntimeSession(
+    """A float session without grain: its pictures are compared with the network's own."""
+    session = clearvisionnn_native.RuntimeSession(
         WIDTH, HEIGHT, 1, config.temporal.value, config.align, config.state_channels,
-        config.side_planes, config.luma_only, config.coding_planes, config.confidence_plane,
+        config.side_planes, config.luma_only, config.confidence_plane,
     )  # fmt: skip
+    session.set_grain("none")
+    return session
 
 
 @pytest.mark.parametrize("temporal", ["none", "recurrent"])
@@ -75,7 +78,6 @@ def test_rust_reference_matches_numpy_bit_for_bit_over_a_run(temporal: str, tile
     config, model = _model(temporal)
     network = clearvisionnn_native.IntegerNetwork(model.words())
     session = _session(config)
-    session.set_coding(30.0, False)
     for index, (y, u, v) in enumerate(_real_frames()):
         features = session.prepare(y, u, v)
         packed = network.pack_input(features)
@@ -135,20 +137,3 @@ def test_a_damaged_file_is_refused(damage: str) -> None:
         words[-(len(model.tanh) // 4 + outputs + outputs // 2)] = 1 << 20
     with pytest.raises(ValueError, match="integer model"):
         clearvisionnn_native.IntegerNetwork(words)
-
-
-@pytest.mark.parametrize(
-    ("coding", "expected"), [((30.0, True), [255, 150, 255]), ((None,), [0, 0, 0])]
-)
-def test_coding_planes_reach_the_packed_input(coding: tuple, expected: list[int]) -> None:
-    """Whether the model is told how a frame was coded shows in its 8-bit input planes."""
-    config, model = _model("recurrent")
-    network = clearvisionnn_native.IntegerNetwork(model.words())
-    session = _session(config)
-    session.set_coding(*coding)
-    packed = network.pack_input(session.prepare(*_real_frames()[0]))
-    stored = packed.view(np.int8).reshape(HEIGHT * WIDTH, -1)  # a byte per input slot
-    first = model.input_channels - len(expected)  # the coding planes are the last channels
-    for channel, value in enumerate(expected, start=first):
-        plane = stored[:, model.slots.index(channel)].astype(np.int64) + 128  # unsigned planes
-        assert (plane == value).all(), f"channel {channel}"

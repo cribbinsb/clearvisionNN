@@ -3,10 +3,8 @@
 import numpy as np
 import pytest
 
-from clearvisionnn import contract
 from clearvisionnn.config.load import load_config
 from clearvisionnn.registry import Registry
-from clearvisionnn.video import coding
 from clearvisionnn.video.clip import Clip
 from clearvisionnn.video.coding import MAX_QP, parse_encoder_stats
 from clearvisionnn.video.ffmpeg import LOSSLESS_ARGS, encode
@@ -98,7 +96,3 @@ def test_encoder_statistics_give_quantiser_and_frame_type() -> None:
     coding = parse_encoder_stats(text)
     expected = [[1.0, 35.0 / MAX_QP, 1.0], [1.0, 42.5 / MAX_QP, 0.0]]
     assert np.allclose(coding, expected)
-
-
-def test_coding_planes_mean_the_same_to_the_data_and_to_the_runtime() -> None:
-    assert (coding.CODING_CHANNELS, coding.MAX_QP) == (contract.CODING_CHANNELS, contract.MAX_QP)

@@ -8,8 +8,9 @@ The results are `base-<size>.pt` and `<checkpoint name>-sharp.pt` under `--model
 The base run trains from scratch on live data at a constant rate, cut when
 held-out PSNR stops improving, until three cuts have stopped helping
 (`--steps` is then only an upper limit). The fine-tune continues a base model
-for a fixed number of steps on the baked pools with a perceptual term beside
-the pixel loss, which restores the fine texture a pixel loss averages away.
+for a fixed number of steps on the baked pools with a perceptual term and a
+texture term beside the pixel loss, which restore the fine texture a pixel
+loss averages away, on still and on moving content.
 """
 
 from __future__ import annotations
@@ -42,7 +43,10 @@ SHARPEN_STEPS = 1500
 SHARPEN_RATE = 2e-4
 SHARPEN_BATCH = 32
 # Weight of the perceptual term beside the pixel loss.
-SHARPEN_PERCEPTUAL = 0.05
+SHARPEN_PERCEPTUAL = 0.2
+# Weight of the texture term. At 1 it keeps more of the original's texture on
+# moving content for about 0.2 dB of PSNR; at 2 the cost doubles for little more.
+SHARPEN_TEXTURE = 1.0
 # Gradients are clipped to this norm, so one outlier batch cannot throw the weights.
 MAX_GRADIENT_NORM = 1.0
 CHECK_EVERY = 1000
@@ -118,10 +122,14 @@ def base(arguments: argparse.Namespace) -> None:
 
 
 def sharpen(arguments: argparse.Namespace) -> None:
-    """Fine-tune a base model on the baked pools with the perceptual term added."""
+    """Fine-tune a base model on the baked pools with the perceptual and texture terms added."""
     start = load_checkpoint(arguments.sharpen)
     options = replace(
-        start.options, rate=SHARPEN_RATE, batch=SHARPEN_BATCH, perceptual=SHARPEN_PERCEPTUAL
+        start.options,
+        rate=SHARPEN_RATE,
+        batch=SHARPEN_BATCH,
+        perceptual=SHARPEN_PERCEPTUAL,
+        texture=SHARPEN_TEXTURE,
     )
     run = Run.start(options, arguments.device)
     run.model.load_state_dict(start.weights)

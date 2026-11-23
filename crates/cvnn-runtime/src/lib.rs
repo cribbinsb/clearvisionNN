@@ -5,7 +5,8 @@
 //! The network itself runs elsewhere (ONNX Runtime, a browser's `WebGPU` or
 //! `WebNN`). A [`Session`] therefore works in two halves around that call:
 //! [`Session::prepare`] returns the input tensor, and [`Session::finish`]
-//! takes the network's outputs and returns the picture. It is the only
+//! takes the network's outputs and returns the picture, with the grain of the
+//! stream's profile ([`grain`]). It is the only
 //! implementation of this logic outside training, and `cvnn-py` checks it
 //! against the training model.
 
@@ -13,7 +14,6 @@
 
 pub mod blur;
 pub mod camera;
-pub mod coding;
 pub mod colour;
 mod compose;
 pub mod confidence;
@@ -21,6 +21,7 @@ pub mod denoise;
 mod fastmath;
 pub mod fixed;
 mod flow;
+pub mod grain;
 pub mod grid;
 mod history;
 pub mod integer;

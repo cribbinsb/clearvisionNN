@@ -21,7 +21,9 @@ class Degraded:
     motion: torch.Tensor  # (..., 2, rows, cols)
     side: torch.Tensor  # (..., SIDE_CHANNELS, rows, cols)
     reset: torch.Tensor  # (...,) bool
-    coding: torch.Tensor  # (..., CODING_CHANNELS): quantiser and frame type, where known
+    # (..., CODING_CHANNELS): how each frame was coded (`clearvisionnn.video.coding`);
+    # for losses and measurements, never a network input.
+    coding: torch.Tensor
 
     @classmethod
     def from_features(

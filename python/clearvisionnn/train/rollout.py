@@ -17,13 +17,7 @@ def roll(model: SequenceModel, view: Degraded) -> torch.Tensor:
     history: History | None = None
     outputs = []
     for t in range(view.frames.shape[1]):
-        inputs = FrameInput(
-            view.frames[:, t],
-            view.motion[:, t],
-            view.side[:, t],
-            view.reset[:, t],
-            view.coding[:, t],
-        )
+        inputs = FrameInput(view.frames[:, t], view.motion[:, t], view.side[:, t], view.reset[:, t])
         output, history = model.step(inputs, history)
         outputs.append(output)
     return torch.stack(outputs, dim=1)

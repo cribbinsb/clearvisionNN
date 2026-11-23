@@ -5,6 +5,7 @@
 //! Bindings only: no analysis or runtime logic lives here.
 
 mod fixed;
+mod grain;
 mod integer;
 mod runtime;
 mod sender;
@@ -20,11 +21,11 @@ fn clearvisionnn_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<integer::IntegerNetwork>()?;
     module.add_class::<fixed::IntegerRuntimeSession>()?;
     module.add_function(wrap_pyfunction!(sender::reduce_rgba, module)?)?;
+    module.add_function(wrap_pyfunction!(grain::grain_steps, module)?)?;
+    module.add("GRAIN_PROFILES", grain::profiles())?;
     module.add("BLOCK_SIZE", cvnn_common::BLOCK_SIZE)?;
     module.add("SIDE_CHANNELS", cvnn_preproc::SIDE_CHANNELS)?;
     module.add("SIDE_PLANES", cvnn_preproc::PLANES)?;
-    module.add("CODING_CHANNELS", cvnn_runtime::coding::CODING_CHANNELS)?;
-    module.add("MAX_QP", cvnn_runtime::coding::MAX_QP)?;
     module.add("TRUSTED_ERROR", cvnn_runtime::confidence::TRUSTED_ERROR)?;
     module.add("UNTRUSTED_ERROR", cvnn_runtime::confidence::UNTRUSTED_ERROR)?;
     module.add("INTEGER_MAGIC", cvnn_runtime::integer::MAGIC)?;

@@ -5,8 +5,6 @@
 use cvnn_common::FrameFeatures;
 
 use super::{MAX_SAMPLE, Session};
-use crate::SR_SCALE;
-use crate::coding::{FrameCoding, coding_planes};
 use crate::compose::pixel_unshuffle;
 use crate::confidence::Confidence;
 use crate::history::HiddenForm;
@@ -24,8 +22,6 @@ pub(super) struct LumaState {
     /// The previous input luma brought onto the current frame.
     carried: Vec<f32>,
     confidence: Confidence,
-    /// How the frames being prepared were coded, if the caller knows.
-    coding: Option<FrameCoding>,
 }
 
 impl LumaState {
@@ -37,35 +33,27 @@ impl LumaState {
             chroma: Planes::zeros(planes, height, width),
             carried: Vec::new(),
             confidence: Confidence::default(),
-            coding: None,
         }
     }
 }
 
 impl Session {
-    /// Say how the frames prepared from now on were coded (`None`: unknown,
-    /// or never coded). Only a model with coding planes uses it.
-    pub fn set_coding(&mut self, coding: Option<FrameCoding>) {
-        self.luma.coding = coding;
-    }
-
     /// Fill the network input and the conventional upscale for a luma-only
     /// model. Input channels, in order: luma; confidence (if the model takes
     /// it); hidden state and the previous output folded to input resolution
-    /// (recurrent); the coding planes (if the model takes them).
+    /// (recurrent).
     pub(super) fn prepare_luma(
         &mut self,
         y: &[u8],
         u: &[u8],
         v: &[u8],
         features: &FrameFeatures,
-        coding: bool,
         with_confidence: bool,
     ) {
         let (spec, size) = (self.spec, (self.height, self.width));
         let to_unit = |sample: &u8| f32::from(*sample) / MAX_SAMPLE;
         let plane = self.input.plane_len();
-        let (luma, mut rest) = self.input.data_mut().split_at_mut(plane);
+        let (luma, rest) = self.input.data_mut().split_at_mut(plane);
         for (target, sample) in luma.iter_mut().zip(y) {
             *target = to_unit(sample);
         }
@@ -82,9 +70,7 @@ impl Session {
         if spec.temporal == Temporal::Recurrent {
             let confident = usize::from(with_confidence) * plane;
             let (confidence, history) = rest.split_at_mut(confident);
-            let (hidden, history) = history.split_at_mut(spec.state_channels * plane);
-            let (previous, after) = history.split_at_mut(SR_SCALE * SR_SCALE * plane);
-            rest = after;
+            let (hidden, previous) = history.split_at_mut(spec.state_channels * plane);
             self.valid = !features.reset && self.history.is_stored();
             if self.valid {
                 let resampler = &mut self.resampler;
@@ -105,12 +91,6 @@ impl Session {
                 confidence.fill(1.0);
             }
             pixel_unshuffle(self.previous.plane(0), size, previous);
-        }
-        if coding {
-            let values = coding_planes(self.luma.coding);
-            for (target, value) in rest.chunks_exact_mut(plane).zip(values) {
-                target.fill(value);
-            }
         }
     }
 

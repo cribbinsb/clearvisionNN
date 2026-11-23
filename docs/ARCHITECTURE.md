@@ -21,8 +21,8 @@ source video ─► pipeline ─► targets, variants, records ─► data ─�
 |---|---|
 | `cvnn-common` | `BlockGrid`, `FrameFeatures`, `MotionVector`, `Error` |
 | `cvnn-preproc` | `Preprocessor`: luma frames in, `FrameFeatures` out. Motion search, stillness and noise are nanocodec's `nc-analysis`; this crate adds sub-sample refinement (`subpel`) and the reset signal (`reset`) |
-| `cvnn-runtime` | `Session`: the two halves around the network call. `prepare` runs the pre-process, the conventional upscale and the history warp, and returns the network's input; `finish` blends the network's outputs into the picture and stores history |
-| `cvnn-py` | `clearvisionnn_native`: `analyze_sequence` (the pre-process over a sequence, for data loading) and `RuntimeSession` (for the parity test) |
+| `cvnn-runtime` | `Session`: the two halves around the network call. `prepare` runs the pre-process, the conventional upscale and the history warp, and returns the network's input; `finish` blends the network's outputs into the picture, stores history, and then adds the grain of the stream's profile to the luma handed back (`grain`: two fixed profiles and none, `webcam` unless told; never in history) |
+| `cvnn-py` | `clearvisionnn_native`: `analyze_sequence` (the pre-process over a sequence, for data loading), `RuntimeSession` (for the parity test) and `grain_steps` (the runtime's grain under a named profile, for training and scoring with it) |
 | `cvnn-web` | `Upscaler`: the session for the page, RGBA in and out |
 
 Motion convention everywhere: the content of block `p` in the current frame
@@ -82,12 +82,14 @@ is found at `p + vector` in the previous frame, in samples of the analysed
 - `per_frame.PerFrameSR`, `blend.BlendSR`: the temporal variants; both
   implement `SequenceModel.step`.
 - `luma.LumaSR`: the luma-only family (`model.luma_only`): a lean input of
-  luma, optional coding planes (`coding_planes`: known, QP, key frame) and,
-  for `temporal: recurrent`, a hidden state, the previous output and an
-  optional motion-prediction `confidence` plane (`confidence.py`). Its state
-  is bounded inside the exported graph (`state.BoundedState`). The runtime
-  mirrors it in `cvnn-runtime`'s `session/luma.rs`, `confidence.rs` and
-  `coding.rs`; the shared constants are read through `clearvisionnn.contract`.
+  luma and, for `temporal: recurrent`, a hidden state, the previous output
+  and an optional motion-prediction `confidence` plane (`confidence.py`): 22
+  channels for the released models, listed in section 1 of docs/INTEGER.md,
+  which also says why the three coding planes that once followed them (known,
+  QP, key frame) were removed. Its state is bounded inside the exported graph
+  (`state.BoundedState`). The runtime mirrors it in `cvnn-runtime`'s
+  `session/luma.rs` and `confidence.rs`; the shared constants are read
+  through `clearvisionnn.contract`.
 - `resample`: the conventional upscale and the motion warp, outside the network.
 - `sizes`: the S to XXL ladder.
 
@@ -125,12 +127,21 @@ is found at `p + vector` in the previous frame, in samples of the analysed
   the check: bit for bit in an exact form, within the tolerance in the
   approximate one). Planes and the block motion field go up; the
   conventional upscale, the warp of the state and of the previous output, the
-  confidence plane, the network, the residual add and colour conversion are
-  shader passes; the state and the previous output stay on the GPU, and the
+  confidence plane, the network, the residual add, grain on the output
+  picture and colour conversion are shader passes; the state and the previous output stay on the GPU, and the
   pictures reach the view as bitmaps the GPU still holds. Only the motion
   search (`cvnn-preproc`, in WebAssembly) and the simulated sender stay on the
   processor. Float models, and browsers without WebGPU, use the session in
   WebAssembly as before.
+- Grain (section 9 of docs/INTEGER.md; `cvnn_runtime::grain` is the reference)
+  is noise hashed from the frame index and the sample's position, added to
+  the luma of the output picture only: in the finish shader for an 8-bit
+  model, whatever the form of its network's shaders, and in the session's
+  `finish` for a float one, the same integers in both. How much is one of
+  two fixed profiles (`produced`, `webcam`), which the page's ready-made
+  input chooses; nobody sets a level. The comparison pictures get none.
+  `tools/web/runtime_check.py` holds the shader to the reference under every
+  profile.
 - A contract's `network` field names the kind of network file, and with it
   what can run the model: the page offers the 8-bit backend for an integer
   model and the ONNX Runtime backends for a graph.
@@ -161,7 +172,7 @@ is found at `p + vector` in the previous frame, in samples of the analysed
 | `js/gpu-device.js` | A WebGPU device for the page's own shaders; whether the browser has one |
 | `js/gpu-upscaler.js` | The 8-bit upscaler entirely on the GPU: motion search in WebAssembly, the rest in the page's shaders; recovers from a lost device |
 | `js/gpu-runtime.js` | A whole frame on the GPU: buffers, the passes around the network, the pictures; nothing read back unless asked |
-| `js/runtime-shaders.js` | Everything around the integer network in WGSL: upscale, flow, warp, confidence, input assembly, finish, colour |
+| `js/runtime-shaders.js` | Everything around the integer network in WGSL: upscale, flow, warp, confidence, input assembly, finish, grain, colour |
 | `js/int8-backend.js` | The integer network alone on WebGPU, for the WebAssembly session to work around |
 | `js/int8-model.js` | An integer model file as the shaders need it |
 | `js/int8-forms.js` | The forms of the network's shaders: how a layer's products are formed (packed integer, 32-bit float, 16-bit float), and the weights as each binds them |
@@ -174,11 +185,11 @@ is found at `p + vector` in the previous frame, in samples of the analysed
 | `js/webgpu-io.js` | WebGPU tensor traffic: input kept in a GPU buffer, only the changing channels uploaded, outputs read back through reused staging buffers; refuses a half-precision model where the GPU lacks `shader-f16` |
 | `js/source.js` | Sources of the original, as ImageBitmaps with their capture times: sample clips, test pattern, camera, video file |
 | `js/clip-player.js`, `js/clip-frames.js`, `js/mp4.js` | A clip or file played frame by frame, every frame in order, more slowly when the page cannot keep up; the frame-exact decoder and MP4 reader are nanocodec's |
-| `js/degrade.js`, `js/degrade-presets.js` | The "degrade the input" controls as settings: a list of ready-made inputs, and each step by itself; which codecs the browser offers |
+| `js/degrade.js`, `js/degrade-presets.js` | The "degrade the input" controls as settings: a list of ready-made inputs, and each step by itself; which codecs the browser offers. A ready-made input also names the grain profile its output is shown with |
 | `js/camera-pool.js`, `js/camera-worker.js` | The simulated camera (blur, noise, denoise, reduction) as workers taking frames in turn, side by side |
 | `js/sender.js` | The simulated channel: optional codec; pairs decoded frames with their originals |
 | `js/codec.js`, `js/planar.js` | The WebCodecs encode-decode round trip; reading decoded frames as 4:2:0 |
-| `js/upscaler.js` | The upscaler: session, network, session |
+| `js/upscaler.js` | The upscaler: session, network, session; `setGrain(profile)` on every upscaler |
 | `js/frame-pipeline.js` | One frame through sender and upscaler; two frames may be inside at once, the sender's work on one overlapping the GPU's on the one before |
 | `js/pipeline-worker.js`, `js/remote-pipeline.js` | The worker the pipeline runs in, and the page's side of it: the page's own thread only fetches frames (as ImageBitmaps) and shows results |
 | `js/view.js`, `js/magnify.js`, `js/zoom.js` | What the canvas shows: original, input (bicubic), output, input beside output, or the magnifier's four quadrants; zoom and pan of all but the magnifier |

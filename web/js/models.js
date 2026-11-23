@@ -1,5 +1,5 @@
 // The models the page can run: `models/manifest.json` lists directories (and may
-// name the one to open on, `first`), each
+// name the one to open on, `first`, and each directory's release, `releases`), each
 // holding a contract `model.json` and the network file it names: `model.onnx`
 // (float arithmetic) or `model.i8` (8-bit integer), both written by the exporters.
 
@@ -19,14 +19,18 @@ export async function loadModels() {
     const network = contract.network ?? 'onnx';
     const file = network === 'integer' ? contract.integer.file : ONNX_FILE;
     // The list runs from the smallest model up; the manifest names the one the page opens on.
-    return { ...contract, network, directory, opensFirst: directory === manifest.first, url: new URL(file, base).href };
+    return {
+      ...contract, network, directory, release: manifest.releases?.[directory] ?? '',
+      opensFirst: directory === manifest.first, url: new URL(file, base).href,
+    };
   }));
 }
 
-/** A label for the model list: arithmetic, size and design first, then which export it is. */
+/** A label for the model list: release, arithmetic, size and design first, then which export it is. */
 export function describe(model) {
   const arithmetic = model.network === 'integer' ? '8-bit' : model.precision === 'fp32' ? 'float' : `float (${model.precision})`;
   const kind = model.temporal === 'none' ? 'per-frame' : model.temporal;
   const thousands = Math.round(model.parameters / 1e3);
-  return `${arithmetic} · ${model.size.toUpperCase()} · ${kind} — ${model.directory}, ${thousands}k`;
+  const release = model.release ? `${model.release} · ` : '';
+  return `${release}${arithmetic} · ${model.size.toUpperCase()} · ${kind} — ${model.directory}, ${thousands}k`;
 }

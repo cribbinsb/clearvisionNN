@@ -21,7 +21,7 @@ import { createView } from './view.js';
 const element = (id) => document.getElementById(id);
 const byId = (ids) => Object.fromEntries(ids.map((id) => [id, element(id)]));
 const controls = {
-  ...byId(['source', 'file', 'size', 'model', 'backend', 'split', 'zoom', 'preset', 'blur', 'blurValue', 'noise', 'noiseValue', 'denoise', 'denoiseValue', 'kernel', 'codec', 'rate', 'keyint', 'tellModel', 'comparison', 'pause', 'step']),
+  ...byId(['source', 'file', 'size', 'model', 'backend', 'split', 'zoom', 'preset', 'blur', 'blurValue', 'noise', 'noiseValue', 'denoise', 'denoiseValue', 'kernel', 'codec', 'rate', 'keyint', 'comparison', 'pause', 'step']),
   view: [...document.querySelectorAll('input[name="view"]')],
 };
 // The codec's time has a cell id of its own: `codec` is the codec control.
@@ -179,7 +179,7 @@ async function main() {
   }
   // A failed start already shows its error through onState.
   const restart = () => start().catch(() => {});
-  const restarting = ['size', 'model', 'backend', 'file', 'preset', 'blur', 'noise', 'denoise', 'kernel', 'codec', 'rate', 'keyint', 'tellModel', 'comparison'];
+  const restarting = ['size', 'model', 'backend', 'file', 'preset', 'blur', 'noise', 'denoise', 'kernel', 'codec', 'rate', 'keyint', 'comparison'];
   for (const name of restarting) controls[name].addEventListener('change', restart);
   controls.pause.addEventListener('click', () => {
     if (controls.step.disabled) controller.pause();

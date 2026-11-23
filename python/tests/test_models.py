@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from clearvisionnn.config.model import ModelConfig
-from clearvisionnn.contract import CODING_CHANNELS, SIDE_CHANNELS
+from clearvisionnn.contract import SIDE_CHANNELS
 from clearvisionnn.models.blocks import RepConv, fuse
 from clearvisionnn.models.confidence import confidence
 from clearvisionnn.models.factory import build_model
@@ -22,7 +22,6 @@ def _inputs(reset: bool = False, batch: int = 2) -> FrameInput:
         torch.randn(batch, 2, rows, cols),
         torch.rand(batch, SIDE_CHANNELS, rows, cols),
         torch.full((batch,), reset),
-        torch.rand(batch, CODING_CHANNELS),
     )
 
 
@@ -106,9 +105,7 @@ RECURRENT = {"side_planes": False, "luma_only": True, "temporal": "recurrent", "
 
 
 def test_recurrent_model_reconstructs_luma_and_carries_bounded_state() -> None:
-    config = ModelConfig(
-        size="s", layout="flat", coding_planes=True, confidence_plane=True, **RECURRENT
-    )
+    config = ModelConfig(size="s", layout="flat", confidence_plane=True, **RECURRENT)
     model = build_model(config).eval()
     for parameter in model.core.layout.head.parameters():
         torch.nn.init.normal_(parameter, std=0.5)
@@ -146,7 +143,6 @@ def test_confidence_is_full_where_history_matches_and_gone_where_it_cannot() -> 
         {"temporal": "recurrent"},  # the recurrent design is luma-only
         {"luma_only": True},  # needs side_planes: false
         {"luma_only": True, "side_planes": False, "temporal": "blend"},
-        {"coding_planes": True},
         {"luma_only": True, "side_planes": False, "confidence_plane": True},
     ],
 )

@@ -1,6 +1,6 @@
 // nanocodec as the codec between the sender and the upscaler: its encoder
 // reports the quantiser and type of every frame, which the browser's own
-// encoders do not, so the model can be told how each frame was coded. The
+// encoders do not, so the page can show how each frame was coded. The
 // module is large and is fetched only when one of its codecs is chosen.
 
 import { FRAME_RATE, bitrateFor, timestampOf } from './codec.js';

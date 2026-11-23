@@ -8,7 +8,6 @@ import torch
 from PIL import Image
 
 from clearvisionnn.config.model import ModelConfig
-from clearvisionnn.contract import CODING_CHANNELS, MAX_QP
 from clearvisionnn.data.features import analyse
 from clearvisionnn.data.tensors import clip_to_tensor
 from clearvisionnn.models.factory import build_model, trained_core
@@ -32,25 +31,15 @@ def _moving_clip() -> Clip:
     return Clip(y, chroma, np.ascontiguousarray(chroma[:, ::-1]))
 
 
-# How each frame of the clip was coded: unknown, then varying quantisers and one key frame.
-CODING = [None, (30.0, True), (38.5, False), None, (24.0, False)]
 LUMA_ONLY = {"planes": "y", "side_planes": False, "luma_only": True}
 CONFIGS = [
     *({"temporal": temporal, "planes": planes, "align": align}
       for temporal in ("none", "blend") for planes in ("y", "yuv") for align in (True, False)),
-    {**LUMA_ONLY, "coding_planes": True},
+    LUMA_ONLY,
     {**LUMA_ONLY, "temporal": "recurrent", "state_channels": 16, "align": False},
-    {**LUMA_ONLY, "temporal": "recurrent", "state_channels": 16, "coding_planes": True,
-     "confidence_plane": True},
+    {**LUMA_ONLY, "temporal": "recurrent", "state_channels": 16, "confidence_plane": True},
     {**LUMA_ONLY, "temporal": "recurrent", "confidence_plane": True, "align": False},
 ]  # fmt: skip
-
-
-def _coding_planes(coding: tuple[float, bool] | None) -> torch.Tensor:
-    """The (1, CODING_CHANNELS) tensor training would hold for `coding`."""
-    if coding is None:
-        return torch.zeros(1, CODING_CHANNELS)
-    return torch.tensor([[1.0, coding[0] / MAX_QP, float(coding[1])]])
 
 
 @pytest.mark.parametrize("settings", CONFIGS, ids=lambda s: "-".join(map(str, s.values())))
@@ -67,14 +56,13 @@ def test_runtime_matches_the_training_model(settings: dict[str, object]) -> None
     assert features.reset.tolist() == [True, False, False, False, True]
     session = clearvisionnn_native.RuntimeSession(
         WIDTH, HEIGHT, reconstructed_channels(config.planes), config.temporal.value, config.align,
-        config.state_channels, config.side_planes, config.luma_only, config.coding_planes,
-        config.confidence_plane,
+        config.state_channels, config.side_planes, config.luma_only, config.confidence_plane,
     )  # fmt: skip
+    session.set_grain("none")  # the training model's picture carries none
     history = None
     for t in range(FRAMES):
         inputs = FrameInput(frames[t : t + 1], features.motion[t : t + 1], features.side[t : t + 1],
-                            features.reset[t : t + 1], _coding_planes(CODING[t]))  # fmt: skip
-        session.set_coding(*(CODING[t] or (None,)))
+                            features.reset[t : t + 1])  # fmt: skip
         with torch.no_grad():
             expected, history = model.step(inputs, history)
             network_input = torch.from_numpy(session.prepare(clip.y[t], clip.u[t], clip.v[t]))

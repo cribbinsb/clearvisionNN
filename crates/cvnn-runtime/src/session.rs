@@ -3,10 +3,12 @@
 use cvnn_common::{Error, FrameFeatures, Result};
 use cvnn_preproc::{PLANES, PreprocConfig, Preprocessor, SIDE_CHANNELS, write_side_planes};
 
+mod grain;
 mod luma;
 
 use crate::SR_SCALE;
 use crate::compose::{add_detail, blend, pixel_unshuffle};
+use crate::grain::Grain;
 use crate::grid::{GridFilter, GridSpreader};
 use crate::history::{HiddenForm, History};
 use crate::planes::Planes;
@@ -42,6 +44,8 @@ pub struct Session {
     side: Vec<f32>,
     /// What only a luma-only model needs.
     luma: luma::LumaState,
+    /// What is added to the luma of the picture handed back, never to history.
+    grain: Grain,
     /// `prepare` has run and `finish` has not.
     awaiting_network: bool,
 }
@@ -89,6 +93,7 @@ impl Session {
             chroma: Vec::new(),
             side: Vec::new(),
             luma: luma::LumaState::new(spec, height, width),
+            grain: Grain::new(height, width),
             awaiting_network: false,
         })
     }
@@ -103,6 +108,7 @@ impl Session {
     pub fn restart(&mut self) -> Result<()> {
         self.preprocessor.restart()?;
         self.history.clear();
+        self.grain.restart();
         self.awaiting_network = false;
         Ok(())
     }
@@ -142,8 +148,8 @@ impl Session {
         check_len(u.len(), y.len() / 4)?;
         check_len(v.len(), y.len() / 4)?;
         let features = self.preprocessor.push(y)?;
-        if let Input::Luma { coding, confidence } = self.spec.input {
-            self.prepare_luma(y, u, v, &features, coding, confidence);
+        if let Input::Luma { confidence } = self.spec.input {
+            self.prepare_luma(y, u, v, &features, confidence);
         } else {
             self.write_picture(y, u, v);
             self.write_side_planes(&features);
@@ -221,7 +227,9 @@ impl Session {
     /// Turn the network's outputs for the prepared frame into the picture:
     /// 4:4:4 YUV in [0, 1] at twice the input size. `fine` is
     /// `spec.fine_channels()` planes at output size; `coarse` is the hidden
-    /// state at input size (empty for a per-frame model).
+    /// state at input size (empty for a per-frame model). The luma carries
+    /// the grain of the session's profile ([`Session::set_grain`]); history is
+    /// kept without.
     ///
     /// # Errors
     ///
@@ -258,6 +266,7 @@ impl Session {
         } else if spec.temporal == Temporal::Recurrent {
             self.keep_recurrent_history(coarse);
         }
+        self.add_grain();
         self.awaiting_network = false;
         Ok(&self.output)
     }

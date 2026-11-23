@@ -1,9 +1,9 @@
 """The network's input contract, as the Rust pre-process and runtime define it.
 
-The block size, the side-plane layout, the coding planes and the confidence
-plane's scale are constants of the trained weights. They are defined once, in
-Rust (`cvnn-preproc`, `cvnn-runtime`), and read here so that both the data layer
-and the model definitions use them without one importing the other.
+The block size, the side-plane layout and the confidence plane's scale are
+constants of the trained weights. They are defined once, in Rust
+(`cvnn-preproc`, `cvnn-runtime`), and read here so that both the data layer and
+the model definitions use them without one importing the other.
 """
 
 from __future__ import annotations
@@ -16,9 +16,6 @@ BLOCK_SIZE: int = clearvisionnn_native.BLOCK_SIZE  # side of an analysis block, 
 PLANE_NAMES = ("match_error", "match_error_in_noise_units", "noise_sigma", "still_run")
 SIDE_CHANNELS: int = clearvisionnn_native.SIDE_CHANNELS
 SR_SCALE = 2  # output size over input size
-# Per-frame planes saying how a frame was coded: known, quantiser / MAX_QP, key frame.
-CODING_CHANNELS: int = clearvisionnn_native.CODING_CHANNELS
-MAX_QP: float = clearvisionnn_native.MAX_QP
 # A block's mean motion-prediction error (samples in [0, 1]) at which the
 # confidence plane is 1, and at which it reaches 0.
 TRUSTED_ERROR: float = clearvisionnn_native.TRUSTED_ERROR

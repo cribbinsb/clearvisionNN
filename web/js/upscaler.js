@@ -8,7 +8,7 @@ import { backendOf } from './backends.js';
 import { createExchange } from './tensors.js';
 
 // The contract version this page and its WebAssembly module implement.
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function checkContract(model, upscaler, width, height) {
   if (model.schema_version !== SCHEMA_VERSION) {
@@ -24,7 +24,8 @@ function checkContract(model, upscaler, width, height) {
 
 /**
  * An upscaler for `model` on `backendId`, for `width` x `height` input
- * frames: `process(frame, coding)`, `restart()` and `release()`. A backend
+ * frames: `process(frame)`, `setGrain(profile)`, `restart()` and
+ * `release()`. A backend
  * that is a whole upscaler provides it (`tuning` are its own options, for
  * finding out why a device is slow); around one that is only a network,
  * the WebAssembly session does the rest.
@@ -38,8 +39,7 @@ export function createUpscaler(model, backendId, width, height, tuning = {}) {
 /** The WebAssembly session around `backend`'s network. */
 async function createSessionUpscaler(model, backend, width, height) {
   const upscaler = new Upscaler(width, height, model.planes, model.temporal, model.align,
-    model.state_channels, model.side_planes, model.luma_only, model.coding_planes,
-    model.confidence_plane);
+    model.state_channels, model.side_planes, model.luma_only, model.confidence_plane);
   let exchange = null;
   let network;
   try {
@@ -58,15 +58,12 @@ async function createSessionUpscaler(model, backend, width, height) {
   const upscaled = new ImageData(outputWidth, outputHeight);
   return {
     /**
-     * Upscale one 4:2:0 frame. `coding` is `{ quantiser, key }` when the
-     * decoder knows how the frame was coded, else null. Returns the bicubic
-     * and the network's pictures and the time each step took (ms); the
-     * pictures are overwritten by the next call.
+     * Upscale one 4:2:0 frame. Returns the bicubic and the network's
+     * pictures and the time each step took (ms); the pictures are
+     * overwritten by the next call.
      */
-    async process(frame, coding) {
+    async process(frame) {
       const start = performance.now();
-      if (coding) upscaler.set_coding(coding.quantiser, coding.key);
-      else upscaler.clear_coding();
       const input = exchange.prepare(frame);
       const prepared = performance.now();
       let outputs;
@@ -88,6 +85,12 @@ async function createSessionUpscaler(model, backend, width, height) {
     },
     /** Forget earlier frames: the next one starts a new stream. */
     restart: () => upscaler.restart(),
+    /**
+     * Show the frames from now on with the grain of `profile` ('produced',
+     * 'webcam' as an upscaler starts, or 'none') on the upscaled picture.
+     * History never carries it, so it can change at any frame.
+     */
+    setGrain: (profile) => upscaler.set_grain(profile),
     async release() {
       try {
         await network.release();

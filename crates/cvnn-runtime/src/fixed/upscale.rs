@@ -56,7 +56,7 @@ pub(super) fn bilinear2x(source: &[i32], size: (usize, usize), out: &mut [i32]) 
 }
 
 /// `value / 2^shift` to the nearest, halves upwards.
-pub(super) fn round_shift(value: i32, shift: u32) -> i32 {
+pub(crate) fn round_shift(value: i32, shift: u32) -> i32 {
     (value + (1 << (shift - 1))) >> shift
 }
 

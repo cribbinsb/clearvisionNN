@@ -1,9 +1,10 @@
 // Unattended runs for tools/web/smoke.py: `?auto=<backend or default>&frames=<n>` plus
-// any of source, size, model, view, zoom, blur, noise, denoise, kernel, codec, rate, keyint and tell sets
+// any of preset, source, size, model, view, zoom, blur, noise, denoise, kernel, codec, rate and keyint sets
 // the controls, runs that many frames and writes a JSON report into #report.
 
 const DEFAULT_BACKEND = 'default'; // `auto=default` keeps the backend the page chose for the model
-const SELECTS = ['source', 'size', 'codec', 'rate', 'keyint', 'zoom', 'blur', 'noise', 'denoise', 'kernel'];
+// The ready-made input first: choosing it sets the controls after it, which may then be set one by one.
+const SELECTS = ['preset', 'source', 'size', 'codec', 'rate', 'keyint', 'zoom', 'blur', 'noise', 'denoise', 'kernel'];
 
 /**
  * Apply `parameters` to `controls`, run `start(frames)` and report through
@@ -17,8 +18,8 @@ export async function runUnattended(parameters, controls, start, outcome, report
       // A select keeps its old value when given one it does not offer.
       const refused = controls[name] instanceof HTMLSelectElement && controls[name].value !== parameters.get(name);
       if (refused) throw new Error(`${name}=${parameters.get(name)} is not on offer here.`);
+      if (name === 'preset') controls.preset.dispatchEvent(new Event('change'));
     }
-    if (parameters.has('tell')) controls.tellModel.checked = parameters.get('tell') !== '0';
     // The model first: choosing it decides which backends are on offer.
     if (parameters.has('model')) {
       controls.model.selectedIndex = Number(parameters.get('model'));

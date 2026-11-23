@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build nanocodec's browser module into web/nanocodec (generated; not
 # source-controlled). The demo's simulated sender can encode with it, which
-# gives the upscaler the real quantiser and type of every frame. The sibling
+# lets the page show the real quantiser and type of every frame. The sibling
 # nanocodec checkout is only read: the build's output goes under target/.
 # Needs the wasm32-unknown-unknown target and wasm-bindgen-cli 0.2.105, or
 # WASM_BINDGEN set to that executable.
