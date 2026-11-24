@@ -67,6 +67,11 @@
       <div class="metric"><span class="control-label">BITRATE</span><b id="bitrate">–</b></div>
     </div>
     <p id="diagnostics" class="diagnostics" aria-label="Diagnostics"></p>
+    <div class="debug">
+      <button id="debug" class="quiet" type="button" title="Collect what is needed to work out why the page fails or is slow here">Debug info</button>
+      <span id="debugNote" role="status">Something wrong or slow? This collects details of the browser, GPU and run to send.</span>
+      <textarea id="debugText" readonly hidden rows="10" aria-label="Debug information"></textarea>
+    </div>
   </section>
 
   <details class="card" id="settings">

@@ -99,6 +99,8 @@ h1 { font-size: clamp(30px, 3.6vw, 47px); font-weight: 550; line-height: 1.12; l
 
 .diagnostics { margin: 0; padding: 0 20px 12px; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; user-select: all; }
 .diagnostics:empty { display: none; }
+.debug { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 20px 14px; font-size: 11px; color: var(--muted); }
+.debug textarea { flex-basis: 100%; font: 10px/1.4 ui-monospace, monospace; }
 .card { margin-bottom: 12px; padding: 0 20px; }
 .card summary { list-style: none; display: flex; justify-content: space-between; align-items: center; padding: 14px 0; font-size: 12px; font-weight: 550; }
 .card summary::-webkit-details-marker { display: none; }

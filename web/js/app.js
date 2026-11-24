@@ -9,6 +9,7 @@ import { COMPARISONS } from './comparison-upscale.js';
 import { SOFTWARE_ADAPTER, describeGpu } from './gpu-device.js';
 import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS, FIRST_CLIP, clipUrl } from './clips.js';
 import { createController } from './controller.js';
+import { createDebugLog, setUpDebugButton } from './debug-report.js';
 import { setUpDegrade } from './degrade.js';
 import { describe, loadModels } from './models.js';
 import { createPipelineHost } from './remote-pipeline.js';
@@ -28,11 +29,12 @@ const controls = {
 // The codec's time has a cell id of its own: `codec` is the codec control.
 const statCells = () => ({ ...byId(['fps', 'upscalerFps', 'prepare', 'network', 'compute', 'wait', 'finish', 'degrade', 'bitrate', 'coding']), codec: element('codec-time') });
 const diagnostics = element('diagnostics');
-const status = createRunStatus(element('state'), element('status'));
 const credit = element('credit');
 const view = createView(element('view'), controls.split);
 const stats = createStats(statCells());
 const host = createPipelineHost();
+const log = createDebugLog();
+const status = createRunStatus(element('state'), element('status'), (stalled) => log.add(stalled ? 'no frames: not responding' : 'frames again'));
 
 let gpu = null; // the GPU the browser offers, in words
 const tuning = tuningFrom(new URLSearchParams(location.search));
@@ -83,12 +85,14 @@ const controller = createController({
     const start = performance.now();
     view.show(result);
     framesShown += 1;
+    if (framesShown === 1) log.add('first frame shown');
     status.beat(source?.note?.() ?? '');
     if (timed) stats.record({ ...result.timings, show: performance.now() - start }, result.info, asked);
     // Everything needed to say why a slow page is slow, in one line that can be read out or copied.
     if (timed) diagnostics.textContent = `${controls.backend.selectedOptions[0]?.text} · GPU: ${gpu ?? 'none offered'} · shaders: ${result.info.variant ?? 'not the page\'s'} · ms per frame: ${stats.summary()}`;
   },
   onState(state, detail) {
+    log.add(`${state}${state === 'failed' ? `: ${detail}` : ''}`);
     // The transport follows the run: Pause while it moves, Resume and Step while it is held.
     const live = state === 'running' || state === 'paused';
     controls.pause.disabled = !live;
@@ -106,12 +110,28 @@ const controller = createController({
   },
 });
 
+/** What the controls are set to, in words: for the debug log and report. */
+function describeRun() {
+  const chosen = (name) => controls[name].selectedOptions[0]?.text ?? controls[name].value;
+  return ['model', 'backend', 'source', 'size', 'preset', 'codec'].map((name) => `${name} = ${chosen(name)}`).join('; ');
+}
+
+/** What the page is doing now, for the debug report. */
+function debugRun() {
+  return {
+    settings: describeRun(), state: element('state').textContent, status: status.text(),
+    note: element('modelNote').textContent, diagnostics: diagnostics.textContent, gpu, framesShown,
+    backendsUsable: backends.map((backend) => backend.id), ...stats.snapshot(),
+  };
+}
+
 function start(frameLimit) {
   const settings = readSettings();
   credit.textContent = settings.clip ? settings.clip.credit : '';
   asked = settings.degrade.askedKbps;
   stats.reset();
   framesShown = 0;
+  log.add(`start: ${describeRun()}`);
   return controller.start(settings, frameLimit);
 }
 
@@ -171,6 +191,7 @@ async function main() {
   fill(controls.comparison, COMPARISONS.map((comparison) => [comparison.id, comparison.label]));
   // The comparison upscale is the page's own shader: without WebGPU there is only the upscaler's.
   controls.comparison.disabled = !backends.some((backend) => backend.needs === 'webgpu');
+  setUpDebugButton(element('debug'), element('debugText'), element('debugNote'), debugRun, log);
   for (const control of [...controls.view, controls.zoom]) control.addEventListener('change', applyView);
   applyView();
   const parameters = new URLSearchParams(location.search);
@@ -195,4 +216,4 @@ async function main() {
   restart();
 }
 
-main().catch((error) => status.set('failed', String(error)));
+main().catch((error) => { log.add(`failed: ${error}`); status.set('failed', String(error)); });

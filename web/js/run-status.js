@@ -13,8 +13,8 @@ const LABELS = {
 };
 const STALLED = 'No frame has arrived for several seconds. The GPU may be too slow for this model, or its driver may have stalled: choose a smaller model, or reload the page.';
 
-/** A status display on the `badge` and `line` elements. */
-export function createRunStatus(badge, line) {
+/** A status display on the `badge` and `line` elements; `onStall(stalled)` hears the watchdog change its mind. */
+export function createRunStatus(badge, line, onStall) {
   let state = 'loading';
   let message = '';
   let note = '';
@@ -32,7 +32,7 @@ export function createRunStatus(badge, line) {
   setInterval(() => {
     const expecting = state === 'starting' || state === 'running';
     const late = expecting && performance.now() - lastBeat > STALL_MS;
-    if (late !== stalled) { stalled = late; draw(); }
+    if (late !== stalled) { stalled = late; draw(); onStall?.(late); }
   }, CHECK_MS);
   draw();
 
