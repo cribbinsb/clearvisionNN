@@ -6,12 +6,13 @@
 
 import { backendsFor, usableBackends } from './backends.js';
 import { COMPARISONS } from './comparison-upscale.js';
-import { describeGpu } from './gpu-device.js';
+import { SOFTWARE_ADAPTER, describeGpu } from './gpu-device.js';
 import { CLIP_HEIGHT, CLIP_WIDTH, CLIPS, FIRST_CLIP, clipUrl } from './clips.js';
 import { createController } from './controller.js';
 import { setUpDegrade } from './degrade.js';
 import { describe, loadModels } from './models.js';
 import { createPipelineHost } from './remote-pipeline.js';
+import { createRunStatus } from './run-status.js';
 import { openSource } from './source.js';
 import { createStats } from './stats.js';
 import { tuningFrom } from './tuning.js';
@@ -27,7 +28,7 @@ const controls = {
 // The codec's time has a cell id of its own: `codec` is the codec control.
 const statCells = () => ({ ...byId(['fps', 'upscalerFps', 'prepare', 'network', 'compute', 'wait', 'finish', 'degrade', 'bitrate', 'coding']), codec: element('codec-time') });
 const diagnostics = element('diagnostics');
-const status = element('status');
+const status = createRunStatus(element('state'), element('status'));
 const credit = element('credit');
 const view = createView(element('view'), controls.split);
 const stats = createStats(statCells());
@@ -40,11 +41,7 @@ let backends = []; // those this browser can use
 let degrade = null;
 let asked = null; // the bitrate the current run asked the encoder for, kbit/s
 let framesShown = 0;
-
-function say(message, isError = false) {
-  status.textContent = message;
-  status.classList.toggle('error', isError);
-}
+let source = null; // the running session's source, asked each frame for anything unusual about it
 
 function fill(select, options) {
   select.replaceChildren(...options.map(([value, label]) => new Option(label, value)));
@@ -70,10 +67,12 @@ function readSettings() {
 /** Acquire a session's resources into `session`, so the controller can release a partial one. */
 async function open(settings, session) {
   const { kind, clip, width, height } = settings;
+  source = null;
   session.source = await openSource(kind, width, height, { file: settings.file, url: clip && clipUrl(clip.id) });
   const { kernel } = COMPARISONS.find((comparison) => comparison.id === controls.comparison.value);
   session.pipeline = await host.createPipeline(settings.model, settings.backend, width, height, settings.degrade, tuning, kernel);
   session.size = [width, height];
+  source = session.source;
   view.resize(width, height);
   return session;
 }
@@ -84,6 +83,7 @@ const controller = createController({
     const start = performance.now();
     view.show(result);
     framesShown += 1;
+    status.beat(source?.note?.() ?? '');
     if (timed) stats.record({ ...result.timings, show: performance.now() - start }, result.info, asked);
     // Everything needed to say why a slow page is slow, in one line that can be read out or copied.
     if (timed) diagnostics.textContent = `${controls.backend.selectedOptions[0]?.text} · GPU: ${gpu ?? 'none offered'} · shaders: ${result.info.variant ?? 'not the page\'s'} · ms per frame: ${stats.summary()}`;
@@ -94,15 +94,15 @@ const controller = createController({
     controls.pause.disabled = !live;
     controls.pause.textContent = state === 'paused' ? 'Resume' : 'Pause';
     controls.step.disabled = state !== 'paused';
-    if (state === 'starting') say('Starting…');
+    if (state === 'starting') status.set('starting', 'Loading the model and compiling its shaders…');
     if (live) {
       const [width, height] = detail.size;
       const held = state === 'paused' ? ' · paused' : '';
       const backend = controls.backend.selectedOptions[0]?.text ?? '';
-      say(`${width} × ${height} original → ${width / 2} × ${height / 2} input → ${width} × ${height} output · ${backend}${held}`);
+      status.set(state, `${width} × ${height} original → ${width / 2} × ${height / 2} input → ${width} × ${height} output · ${backend}${held}`);
     }
-    if (state === 'idle') say('Finished.');
-    if (state === 'failed') say(String(detail), true);
+    if (state === 'idle') status.set('idle', '');
+    if (state === 'failed') status.set('failed', String(detail));
   },
 });
 
@@ -124,9 +124,9 @@ function applyView() {
 }
 
 function outcome() {
-  const failed = status.classList.contains('error');
+  const failed = status.failed();
   return {
-    ok: !failed, error: failed ? status.textContent : undefined,
+    ok: !failed, error: failed ? status.text() : undefined,
     backend: controls.backend.value, frames: framesShown, asked, ...stats.snapshot(),
   };
 }
@@ -152,7 +152,8 @@ function offerModels() {
   controls.model.selectedIndex = Math.max(preferred >= 0 ? preferred : runnable, 0);
   const fallback = preferred < 0 && !runs(models.find((model) => model.opensFirst) ?? models[0]);
   element('modelNote').textContent = fallback
-    ? 'This browser has no usable WebGPU, which the 8-bit models need, so the page is running a float model on a much slower backend. Use a current Chrome, Edge or Safari with WebGPU switched on.' : '';
+    ? 'This browser has no usable WebGPU, which the 8-bit models need, so the page is running a float model on a much slower backend. Use a current Chrome, Edge or Safari with WebGPU switched on.'
+    : gpu?.endsWith(SOFTWARE_ADAPTER) ? 'This browser is running WebGPU in software, not on a GPU, so every model will be slow. Check that hardware acceleration is switched on in the browser\'s settings.' : '';
   offerBackends();
   // Registered before the listeners that restart a run, so a run never starts on a stale backend.
   controls.model.addEventListener('change', offerBackends);
@@ -194,4 +195,4 @@ async function main() {
   restart();
 }
 
-main().catch((error) => say(String(error), true));
+main().catch((error) => status.set('failed', String(error)));

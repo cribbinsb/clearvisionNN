@@ -21,6 +21,8 @@ export async function openClipPlayer(url, width, height, release) {
   let played = 0; // frames handed out; the clip loops, so this passes its length
   let due = performance.now(); // when the next frame may be shown, at the clip's own pace
   return {
+    /** Anything unusual about how the clip is being read, for the page to show; '' when nothing is. */
+    note: () => (clip.software ? 'video decoded in software (the hardware decoder failed)' : ''),
     async grab() {
       const frame = await clip.frame(played % clip.frameCount);
       played += 1;

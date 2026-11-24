@@ -9,6 +9,9 @@ const ATTEMPT_INTERVAL_MS = 250;
 // 16-bit float shaders are what an Apple GPU runs the network fastest in (int8-forms.js).
 const OPTIONAL_FEATURES = ['timestamp-query', 'shader-f16'];
 
+// How a WebGPU adapter that runs on the processor, not a GPU, is marked in the page's description of it.
+export const SOFTWARE_ADAPTER = '(software rendering)';
+
 const pause = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 async function requestAdapter() {
@@ -33,8 +36,9 @@ export async function hasWebGpu() {
 export async function describeGpu() {
   const adapter = await requestAdapter();
   if (!adapter) return null;
-  const { vendor, architecture, description } = adapter.info ?? {};
-  return [vendor, architecture, description].filter(Boolean).join(' ') || 'unnamed adapter';
+  const { vendor, architecture, description, isFallbackAdapter } = adapter.info ?? {};
+  const name = [vendor, architecture, description].filter(Boolean).join(' ') || 'unnamed adapter';
+  return isFallbackAdapter ? `${name} ${SOFTWARE_ADAPTER}` : name;
 }
 
 /** Resolves to a new device; rejects if the browser offers no adapter. */

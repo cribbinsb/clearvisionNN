@@ -11,8 +11,13 @@
 // decoder, and, beyond the frame waited for, at most DECODE_AHEAD_FRAMES
 // decoded or decoding.
 //
+// The browser picks the decoder, normally the GPU's. If that one fails (some
+// drivers refuse a stream, or stall and take the decoder with them), decoding
+// starts again in software from the frame the page was waiting for; only a
+// failure of the software decoder as well ends the clip.
+//
 // Taken from nanocodec's web/clip-source.js (BSD-3-Clause, same owner), with
-// only its comments reworded for this page.
+// its comments reworded for this page and the software fallback added.
 import { readMp4 } from './mp4.js';
 
 const MICROSECONDS_PER_SECOND = 1e6;
@@ -53,6 +58,8 @@ export class ClipSource {
     this.ready = new Map();
     this.waiters = new Map();
     this.error = null;
+    // Whether the browser's own choice of decoder failed and a software one took over.
+    this.software = false;
     this.decoder = this.createDecoder(0);
   }
   /** A new decoder, fed from sample `next` on. */
@@ -65,10 +72,24 @@ export class ClipSource {
     this.flushed = false; this.drained = false;
     const decoder = new VideoDecoder({
       output: frame => this.received(frame),
-      error: error => { this.error = error; this.rejectWaiters(error); },
+      error: error => { if (decoder === this.decoder) this.failed(error); },
     });
     decoder.configure(this.config);
     return decoder;
+  }
+  /** The decoder stopped with `error`: once, carry on in software; after that the clip has failed. */
+  failed(error) {
+    if (this.software) {
+      this.error = error;
+      this.rejectWaiters(error);
+      return;
+    }
+    this.software = true;
+    this.config = { ...this.config, hardwareAcceleration: 'prefer-software' };
+    // The first frame not handed out yet; requests waiting for it and later ones stay waiting.
+    const wanted = this.waiters.size ? Math.min(...this.waiters.keys()) : this.lastTaken + 1;
+    this.restart(Math.max(this.samples.findIndex(s => s.index === wanted), 0));
+    this.feed();
   }
   received(frame) {
     this.pending--;
@@ -105,6 +126,8 @@ export class ClipSource {
    * after the last sample, flush it so the frames it holds for reordering come out.
    */
   feed() {
+    // A decoder that failed is closed before its error is reported; `failed` feeds its successor.
+    if (this.decoder.state !== 'configured') return;
     while (this.next < this.samples.length && this.pending < MAX_PENDING_SAMPLES
       && (this.waiters.size || this.ready.size + this.pending < DECODE_AHEAD_FRAMES)) {
       const sample = this.samples[this.next++];
@@ -148,7 +171,7 @@ export class ClipSource {
   restart(position) {
     let key = position;
     while (key > 0 && !this.samples[key].key) key--;
-    this.decoder.close();
+    if (this.decoder.state !== 'closed') this.decoder.close();
     for (const frame of this.ready.values()) frame.close();
     this.ready.clear();
     this.decoder = this.createDecoder(key);
