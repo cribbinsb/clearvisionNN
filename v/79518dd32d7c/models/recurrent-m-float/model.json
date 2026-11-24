@@ -1,0 +1,28 @@
+{
+ "schema_version": 3,
+ "colour": "bt709-limited",
+ "size_multiple": 4,
+ "name": "recurrent-m-float",
+ "layout": "flat",
+ "size": "m",
+ "step": 0,
+ "planes": 1,
+ "temporal": "recurrent",
+ "align": true,
+ "state_channels": 16,
+ "side_planes": false,
+ "luma_only": true,
+ "confidence_plane": true,
+ "input_channels": 22,
+ "fine_channels": 1,
+ "parameters": 150868,
+ "network": "onnx",
+ "precision": "fp32",
+ "onnx_sha256": "a6f4c678a7b1baf8d741d5693aa5c919e2f7b7f02bc8440ac57d256e15565b5a",
+ "checkpoint_hash": "1d525b11c487d7a4",
+ "provenance": {
+  "recipe": "recipe/README.md",
+  "torch_version": "2.12.1+cu130"
+ },
+ "integer": null
+}

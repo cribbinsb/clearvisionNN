@@ -1,0 +1,35 @@
+{
+ "schema_version": 3,
+ "colour": "bt709-limited",
+ "size_multiple": 4,
+ "name": "recurrent-xl-8bit",
+ "layout": "flat",
+ "size": "xl",
+ "step": 0,
+ "planes": 1,
+ "temporal": "recurrent",
+ "align": true,
+ "state_channels": 16,
+ "side_planes": false,
+ "luma_only": true,
+ "confidence_plane": true,
+ "input_channels": 22,
+ "fine_channels": 1,
+ "parameters": 724372,
+ "network": "integer",
+ "precision": "int8",
+ "onnx_sha256": null,
+ "checkpoint_hash": "dd7ff8d1d7a0721e",
+ "provenance": {
+  "recipe": "recipe/README.md",
+  "torch_version": "2.12.1+cu130"
+ },
+ "integer": {
+  "schema_version": 1,
+  "file": "model.i8",
+  "sha256": "dbd9cd59964ea3b4b15ffaef33a0d9725b7de7aa7e6d77ace23f54321a5c16fe",
+  "state_bits": 8,
+  "halo": 6,
+  "tile": 128
+ }
+}
